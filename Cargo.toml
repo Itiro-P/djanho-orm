@@ -1,6 +1,6 @@
 [package]
 name = "djanho-orm"
-authors = ["Pedro N <itiropedro@gmail.com>", "João Ricardo <joao@gmail.com>", "Marco <marco@gmail.com>", "Leonardo <leo@gmail.com>"]
+authors = ["Pedro N <itiropedro@gmail.com>", "João Ricardo <jrzr432@gmail.com>", "Marco <marco@gmail.com>", "Leonardo <leo@gmail.com>"]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
