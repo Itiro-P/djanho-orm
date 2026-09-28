@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "djanho-macros"
+version = "0.1.0"
+
+[[package]]
 name = "djanho-orm"
 version = "0.1.0"
+dependencies = [
+ "djanho-macros",
+]
