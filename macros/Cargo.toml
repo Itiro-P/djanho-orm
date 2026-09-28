@@ -9,3 +9,7 @@ description = "The derive macros for the Djanho ORM."
 
 [lib]
 proc-macro = true
+
+[dependencies]
+syn = "3"
+quote = "1"

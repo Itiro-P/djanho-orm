@@ -1,3 +1,6 @@
+use djanho_orm::Djanho;
+
+#[derive(Djanho)]
 struct Person {
     name: String,
     age: i32,
