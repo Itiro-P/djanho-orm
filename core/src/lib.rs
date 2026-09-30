@@ -1,27 +1,29 @@
 pub mod metadata;
 pub mod model_entry;
-mod generators;
+pub mod generators;
+
+use std::fs::File;
+use std::io::Write;
 
 #[doc(hidden)]
 pub use inventory;
 
 inventory::collect!(model_entry::ModelEntry);
 
-/// Junta o SQL e o HTML de todas as structs com #[derive(Djanho)] e cria um schema.sql e um form.html unificado.
+/// Junta o SQL e o HTML de todas as structs com #[derive(Djanho)] 
+/// e cria um schema.sql e um form.html unificados.
 pub fn generate() -> std::io::Result<()> {
-    let mut entries: Vec<&model_entry::ModelEntry> = inventory::iter::<model_entry::ModelEntry>.into_iter().collect();
+    let mut entries: Vec<&model_entry::ModelEntry> = inventory::iter::<model_entry::ModelEntry>().into_iter().collect();
     entries.sort_by_key(|e| e.name);
 
-    for entry in entries {
-        generate_files(entry)?;
-    }
+    let html_content = generators::generate_form(&entries);
+    let sql_content  = generators::generate_schema(&entries);
 
-    return Ok(());
-}
+    File::create("form.html")?
+        .write_all(html_content.as_bytes())?;
 
-fn generate_files(entry: &model_entry::ModelEntry) -> std::io::Result<()> {
-    generators::generate_schema(entry)?;
-    generators::generate_form(entry)?;
+    File::create("schema.sql")?
+        .write_all(sql_content.as_bytes())?;
 
-    return Ok(());
+    Ok(())
 }
