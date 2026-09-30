@@ -9,6 +9,7 @@ description = "The Djanho ORM. A (not) blazing fast Rust Object Relational Mappe
 
 [dependencies]
 djanho-macros = { path = "macros" }
+djanho-core = { path = "core" }
 
 [workspace]
-members = ["macros"]
+members = ["core","macros"]
