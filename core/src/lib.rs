@@ -19,10 +19,10 @@ pub fn generate() -> std::io::Result<()> {
     let html_content = generators::generate_form(&entries);
     let sql_content  = generators::generate_schema(&entries);
 
-    File::create("form.html")?
+    File::create("docker/form.html")?
         .write_all(html_content.as_bytes())?;
 
-    File::create("schema.sql")?
+    File::create("docker/schema.sql")?
         .write_all(sql_content.as_bytes())?;
 
     Ok(())

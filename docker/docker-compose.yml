@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8000"
+    volumes:
+      - ./form.html:/app/form.html:ro
+      - ./schema.sql:/app/schema.sql:ro
+      - db-data:/data
+
+volumes:
+  db-data:
