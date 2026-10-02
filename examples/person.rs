@@ -4,15 +4,13 @@ use djanho_orm::Djanho;
 struct Person {
     name: String,
     age: i32,
-    cpf: Option<String>
+    cpf: Option<String>,
 }
 
 #[derive(Djanho)]
-struct Pig {
-    name: String,
-    age: i32,
-    cpf: Option<String>
+struct Empty {
 }
+
 
 fn main() {  
     let _ = djanho_core::generate();

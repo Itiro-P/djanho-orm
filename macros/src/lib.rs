@@ -3,6 +3,7 @@ use syn::{parse_macro_input, DeriveInput, Data, Fields};
 use quote::quote;
 use djanho_core::{metadata::{FieldMetadata, StructMetadata}};
 
+/// Macro responsável por gerar o formulário de uma estrutura
 #[proc_macro_derive(Djanho)]
 pub fn djanho_derive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);

@@ -14,7 +14,6 @@ class Handler(BaseHTTPRequestHandler):
         # TODO: responder 200 com o conteúdo de form.html
         #       (Content-Type: text/html)
         pass
-
     def do_POST(self):
         # 1. ler Content-Length e o corpo (self.rfile.read)
         # 2. parse_qs(corpo.decode()) -> dict de listas
