@@ -11,9 +11,13 @@ def init_db():
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # TODO: responder 200 com o conteúdo de form.html
-        #       (Content-Type: text/html)
-        pass
+        with open("form.html", "rb") as f:
+            corpo = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(corpo)))
+        self.end_headers()
+        self.wfile.write(corpo)
     def do_POST(self):
         # 1. ler Content-Length e o corpo (self.rfile.read)
         # 2. parse_qs(corpo.decode()) -> dict de listas
