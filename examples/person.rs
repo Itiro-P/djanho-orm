@@ -25,6 +25,18 @@ struct NotEmpty{
 }
 
 #[derive(Djanho)]
+struct Author {
+    name: String,
+}
+
+#[derive(Djanho)]
+struct Book {
+    title: String,
+    #[djanho(foreign_key = "Author")]
+    author_id: i32,
+}
+
+#[derive(Djanho)]
 struct Empty {}
 
 fn main() {

@@ -24,9 +24,11 @@ pub fn generate_schema(
     entries: &[&ModelEntry],
     choices: &[&ChoiceEntry],
 ) -> Result<String, String> {
+    validate_references(entries)?;
+
     let mut schemas = Vec::new();
 
-    for entry in entries {
+    for entry in order_by_dependency(entries) {
         if entry.fields.is_empty() {
             continue;
         }
@@ -35,6 +37,67 @@ pub fn generate_schema(
     }
 
     Ok(schemas.join("\n\n"))
+}
+
+/// Garante que toda foreign key aponta para um model registrado.
+fn validate_references(entries: &[&ModelEntry]) -> Result<(), String> {
+    for entry in entries {
+        for field in entry.fields {
+            let Some(target) = field.references else {
+                continue;
+            };
+
+            let exists = entries
+                .iter()
+                .any(|other| other.name == target && !other.fields.is_empty());
+
+            if !exists {
+                return Err(format!(
+                    "O campo '{}.{}' referencia '{}', mas esse model não foi registrado com #[derive(Djanho)]",
+                    entry.name, field.name, target
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Coloca as tabelas referenciadas antes de quem as referencia.
+/// Em caso de ciclo, mantém o restante na ordem original.
+fn order_by_dependency<'a>(entries: &[&'a ModelEntry]) -> Vec<&'a ModelEntry> {
+    let mut ordered: Vec<&ModelEntry> = Vec::new();
+    let mut pending: Vec<&ModelEntry> = entries.to_vec();
+
+    while !pending.is_empty() {
+        let before = pending.len();
+        let mut still_pending = Vec::new();
+
+        for entry in pending {
+            let ready = entry.fields.iter().all(|field| match field.references {
+                None => true,
+                Some(target) => {
+                    target == entry.name
+                        || ordered.iter().any(|done| done.name == target)
+                }
+            });
+
+            if ready {
+                ordered.push(entry);
+            } else {
+                still_pending.push(entry);
+            }
+        }
+
+        pending = still_pending;
+
+        if pending.len() == before {
+            ordered.extend(pending);
+            break;
+        }
+    }
+
+    ordered
 }
 
 fn generate_model_form(
@@ -213,7 +276,7 @@ fn generate_model_schema(
     entry: &ModelEntry,
     choices: &[&ChoiceEntry],
 ) -> Result<String, String> {
-    let mut columns = Vec::new();
+    let mut columns = vec!["    id INTEGER PRIMARY KEY".to_string()];
 
     for field in entry.fields {
         columns.push(generate_sql_column(entry.name, field, choices)?);
@@ -236,7 +299,7 @@ fn generate_sql_column(
 ) -> Result<String, String> {
     let not_null = if field.optional { "" } else { " NOT NULL" };
 
-    let column = match field.kind {
+    let mut column = match field.kind {
         FieldKind::Text => {
             format!("    {} TEXT{}", field.name, not_null)
         }
@@ -287,6 +350,10 @@ fn generate_sql_column(
             )
         }
     };
+
+    if let Some(target) = field.references {
+        column.push_str(&format!(" REFERENCES {}(id)", target));
+    }
 
     Ok(column)
 }

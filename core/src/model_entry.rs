@@ -19,6 +19,8 @@ pub struct FieldEntry {
     pub kind: FieldKind,
     /// `true` quando o tipo original era `Option<T>`.
     pub optional: bool,
+    /// Nome do model apontado, quando o campo é uma chave estrangeira.
+    pub references: Option<&'static str>,
 }
 
 /// Metadados de uma struct registrada com `#[derive(Djanho)]`.
