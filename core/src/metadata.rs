@@ -1,90 +1,162 @@
-/// Guarda as informações de um campo de uma estrutura
+use syn::{GenericArgument, PathArguments, Type};
+
+/// Tipo de campo descoberto durante a expansão do procedural macro.
+///
+/// Diferente de `model_entry::FieldKind`, esta versão pode possuir `String`,
+/// porque existe apenas enquanto o macro está analisando o código-fonte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldTypeMetadata {
+    Text,
+    Character,
+    Integer,
+    Real,
+    Boolean,
+    Choice(String),
+}
+
+/// Resultado da análise de um `syn::Type`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeMetadata {
+    pub field_type: FieldTypeMetadata,
+    pub optional: bool,
+}
+
+/// Guarda as informações de um campo de uma estrutura durante a expansão do
+/// macro.
 pub struct FieldMetadata {
-    /// O nome do campo
     pub name: String,
-    /// O tipo do campo
-    pub target_type: syn::Type
+    pub target_type: Type,
 }
 
 impl FieldMetadata {
-    /// Instancia um novo `FieldMetadata`
-    pub fn new(name: String, target_type: syn::Type) -> Self {
-        return Self {name: name, target_type: target_type};
+    pub fn new(name: String, target_type: Type) -> Self {
+        Self { name, target_type }
     }
 
-    /// Imprime um `FieldMetadata`
+    /// Interpreta o tipo Rust do campo para o conjunto de tipos suportados
+    /// pelo Djanho.
+    pub fn type_metadata(&self) -> Option<TypeMetadata> {
+        analyze_type(&self.target_type)
+    }
+
     pub fn print(&self) {
         let ty = &self.target_type;
-        println!("Name -> {}; Type -> {}.", self.name, quote::quote!(#ty).to_string());
+        println!(
+            "Name -> {}; Type -> {}.",
+            self.name,
+            quote::quote!(#ty)
+        );
     }
 }
 
-/// Guarda as informações de uma estrutura
+/// Guarda as informações de uma estrutura durante a expansão do macro.
 pub struct StructMetadata {
-    /// O nome da estrutura
     pub name: String,
-    /// Os campos da estrutura
-    pub fields: Vec<FieldMetadata>
+    pub fields: Vec<FieldMetadata>,
 }
 
 impl StructMetadata {
-    /// Instancia um novo `StructMetadata`
     pub fn new(name: String, fields: Vec<FieldMetadata>) -> Self {
-        return Self {name: name, fields: fields};
+        Self { name, fields }
     }
 
-    /// Imprime um `StructMetadata`
     pub fn print(&self) {
         println!("Struct: {}\nFields:", self.name);
-        
+
         for field in &self.fields {
             print!(" - ");
             field.print();
         }
     }
+}
 
-    /// Gera um formulário html correspondente à estrutura
-    pub fn to_html(&self) -> String {
-        return String::from("html muito bonito aq :)\n");
+/// Analisa um tipo Rust.
+///
+/// Exemplos:
+/// - `String` -> `Text`, obrigatório
+/// - `Option<String>` -> `Text`, opcional
+/// - `i32` -> `Integer`, obrigatório
+/// - `Gender` -> `Choice("Gender")`, obrigatório
+pub fn analyze_type(ty: &Type) -> Option<TypeMetadata> {
+    let (base_type, optional) = unwrap_option(ty);
+    let field_type = classify_base_type(base_type)?;
+
+    Some(TypeMetadata {
+        field_type,
+        optional,
+    })
+}
+
+/// Remove uma ou mais camadas externas de `Option<T>`.
+fn unwrap_option(mut ty: &Type) -> (&Type, bool) {
+    let mut optional = false;
+
+    while let Some(inner) = option_inner_type(ty) {
+        optional = true;
+        ty = inner;
     }
-    
-    /// Gera uma tabela sql correspondente à estrutura
-    pub fn to_sql(&self) -> String {
-        let mut columns: Vec<String> = Vec::new();
-        let mut sql: String = String::new();
-        sql.push_str(&format!("CREATE TABLE IF NOT EXISTS {} (\n", self.name));
-        for field in &self.fields {
-            let field_type = sql_type(&field.target_type);
 
-            match field_type {
-                Some(ty) => columns.push(format!("\t{} {}", field.name, ty)),
-                None => continue,
-            }  
-        }
-        
-        if columns.is_empty() {
-            return String::from("");
-        }
+    (ty, optional)
+}
 
-        sql.push_str(&columns.join(",\n"));
-        sql.push_str("\n);");
+/// Retorna o `T` de `Option<T>` quando `ty` for exatamente um `Option<T>`.
+fn option_inner_type(ty: &Type) -> Option<&Type> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
 
-        return sql;
+    let segment = type_path.path.segments.last()?;
+
+    if segment.ident != "Option" {
+        return None;
+    }
+
+    let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return None;
+    };
+
+    if arguments.args.len() != 1 {
+        return None;
+    }
+
+    match arguments.args.first()? {
+        GenericArgument::Type(inner) => Some(inner),
+        _ => None,
     }
 }
 
-/// Retorna o tipo correspondente do sql relacionado ao tipo rust dado
-fn sql_type(ty: &syn::Type) -> Option<&'static str> {
-    if let syn::Type::Path(type_path) = ty {
-        let seg = type_path.path.segments.last()?;
-        let name = seg.ident.to_string();
-        match name.as_str() {
-            "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "bool" => Some("INTEGER"),
-            "f32" | "f64" => Some("REAL"),
-            "String" | "char" => Some("TEXT"),
-            _ => None,
-        }
-    } else {
+/// Classifica o tipo já sem `Option<T>`.
+fn classify_base_type(ty: &Type) -> Option<FieldTypeMetadata> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+
+    let segment = type_path.path.segments.last()?;
+
+    // Tipos genéricos desconhecidos, como Vec<String>, não são tratados como
+    // enums por acidente.
+    if !matches!(segment.arguments, PathArguments::None) {
         return None;
     }
+
+    let name = segment.ident.to_string();
+
+    let kind = match name.as_str() {
+        "String" => FieldTypeMetadata::Text,
+        "char" => FieldTypeMetadata::Character,
+
+        "i8" | "i16" | "i32" | "i64" | "isize"
+        | "u8" | "u16" | "u32" | "u64" | "usize" => {
+            FieldTypeMetadata::Integer
+        }
+
+        "f32" | "f64" => FieldTypeMetadata::Real,
+        "bool" => FieldTypeMetadata::Boolean,
+
+        // Qualquer outro path simples é tratado como um Choice. Durante a
+        // geração final ele precisa existir no inventory como ChoiceEntry.
+        _ => FieldTypeMetadata::Choice(name),
+    };
+
+    Some(kind)
 }

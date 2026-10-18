@@ -1,24 +1,40 @@
+pub mod choice_entry;
+pub mod generators;
 pub mod metadata;
 pub mod model_entry;
-pub mod generators;
 
 use std::fs::File;
-use std::io::Write;
+use std::io::{self, Write};
 
 #[doc(hidden)]
 pub use inventory;
 
 inventory::collect!(model_entry::ModelEntry);
+inventory::collect!(choice_entry::ChoiceEntry);
 
-/// Junta o SQL e o HTML de todas as structs com #[derive(Djanho)] 
-/// e cria um schema.sql e um form.html unificados.
-pub fn generate() -> std::io::Result<()> {
-    let mut entries: Vec<&model_entry::ModelEntry> = inventory::iter::<model_entry::ModelEntry>().into_iter().collect();
-    entries.sort_by_key(|e| e.name);
+/// Junta os metadados registrados por `Djanho` e `DjanhoChoice` e cria
+/// `docker/schema.sql` e `docker/form.html`.
+pub fn generate() -> io::Result<()> {
+    let mut entries: Vec<&model_entry::ModelEntry> =
+        inventory::iter::<model_entry::ModelEntry>
+            .into_iter()
+            .collect();
 
-    let html_content = generators::generate_form(&entries);
-    let sql_content  = generators::generate_schema(&entries);
+    let mut choices: Vec<&choice_entry::ChoiceEntry> =
+        inventory::iter::<choice_entry::ChoiceEntry>
+            .into_iter()
+            .collect();
 
+    entries.sort_by_key(|entry| entry.name);
+    choices.sort_by_key(|choice| choice.name);
+
+    let html_content = generators::generate_form(&entries, &choices)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
+
+    let sql_content = generators::generate_schema(&entries, &choices)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
+
+    // A pasta `docker/` já faz parte da estrutura do projeto.
     File::create("docker/form.html")?
         .write_all(html_content.as_bytes())?;
 

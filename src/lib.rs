@@ -1,1 +1,1 @@
-pub use djanho_macros::Djanho;
+pub use djanho_macros::{Djanho, DjanhoChoice};
