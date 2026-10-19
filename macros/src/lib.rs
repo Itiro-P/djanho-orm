@@ -7,8 +7,31 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Fields};
 
+/// Lê `#[djanho(foreign_key = "Model")]` de um campo.
+fn parse_references(field: &syn::Field) -> syn::Result<Option<String>> {
+    let mut references = None;
+
+    for attr in &field.attrs {
+        if !attr.path().is_ident("djanho") {
+            continue;
+        }
+
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("foreign_key") {
+                let value: syn::LitStr = meta.value()?.parse()?;
+                references = Some(value.value());
+                Ok(())
+            } else {
+                Err(meta.error("atributo desconhecido; use #[djanho(foreign_key = \"Model\")]"))
+            }
+        })?;
+    }
+
+    Ok(references)
+}
+
 /// Registra uma struct como model do Djanho.
-#[proc_macro_derive(Djanho)]
+#[proc_macro_derive(Djanho, attributes(djanho))]
 pub fn djanho_derive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
     let struct_name = &ast.ident;
@@ -42,9 +65,24 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
             continue;
         };
 
+        if field_name == "id" {
+            return syn::Error::new_spanned(
+                field_name,
+                "o campo 'id' é reservado: o Djanho cria a chave primária automaticamente",
+            )
+            .to_compile_error()
+            .into();
+        }
+
+        let references = match parse_references(field) {
+            Ok(references) => references,
+            Err(error) => return error.to_compile_error().into(),
+        };
+
         fields.push(FieldMetadata::new(
             field_name.to_string(),
             field.ty.clone(),
+            references,
         ));
     }
 
@@ -68,6 +106,25 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
 
         let field_name = &field.name;
         let optional = type_metadata.optional;
+
+        if field.references.is_some()
+            && type_metadata.field_type != FieldTypeMetadata::Integer
+        {
+            return syn::Error::new_spanned(
+                &field.target_type,
+                format!(
+                    "o campo '{}' é uma foreign_key e precisa ser um inteiro (i32, i64...)",
+                    field.name
+                ),
+            )
+            .to_compile_error()
+            .into();
+        }
+
+        let references = match &field.references {
+            Some(target) => quote!(::core::option::Option::Some(#target)),
+            None => quote!(::core::option::Option::None),
+        };
 
         let kind = match type_metadata.field_type {
             FieldTypeMetadata::Text => {
@@ -97,6 +154,7 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
                 name: #field_name,
                 kind: #kind,
                 optional: #optional,
+                references: #references,
             }
         });
     }

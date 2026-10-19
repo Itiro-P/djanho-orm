@@ -26,11 +26,12 @@ pub struct TypeMetadata {
 pub struct FieldMetadata {
     pub name: String,
     pub target_type: Type,
+    pub references: Option<String>,
 }
 
 impl FieldMetadata {
-    pub fn new(name: String, target_type: Type) -> Self {
-        Self { name, target_type }
+    pub fn new(name: String, target_type: Type, references: Option<String>) -> Self {
+        Self { name, target_type, references }
     }
 
     /// Interpreta o tipo Rust do campo para o conjunto de tipos suportados
