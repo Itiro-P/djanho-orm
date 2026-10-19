@@ -104,7 +104,7 @@ fn generate_model_form(
     entry: &ModelEntry,
     choices: &[&ChoiceEntry],
 ) -> Result<String, String> {
-    let route = entry.name.to_lowercase();
+    let route = entry.name;
     let mut html = String::new();
 
     html.push_str(&format!("<h1> {} </h1>\n", entry.name));
@@ -318,7 +318,7 @@ fn generate_sql_column(
         }
 
         FieldKind::Boolean => format!(
-            "    {0} INTEGER{1} CHECK ({0} IN (0, 1))",
+            "    {0} BOOLEAN{1} CHECK ({0} IN (0, 1))",
             field.name, not_null
         ),
 
