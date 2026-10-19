@@ -16,6 +16,8 @@ pub fn generate_form(
         forms.push(generate_model_form(entry, choices)?);
     }
 
+    forms.push(generate_css());
+
     Ok(forms.join("\n\n"))
 }
 
@@ -107,9 +109,12 @@ fn generate_model_form(
     let route = entry.name;
     let mut html = String::new();
 
-    html.push_str(&format!("<h1> {} </h1>\n", entry.name));
     html.push_str(&format!(
-        "<form method=\"post\" action=\"/{}\">\n",
+        "<h1 class=\"djanho-title\"> {} </h1>\n",
+        entry.name
+    ));
+    html.push_str(&format!(
+        "<form class=\"djanho-form\" method=\"post\" action=\"/{}\">\n",
         route
     ));
 
@@ -123,7 +128,7 @@ fn generate_model_form(
         }
     }
 
-    html.push_str("    <button type=\"submit\">Cadastrar</button>\n");
+    html.push_str("    <button class=\"djanho-submit\" type=\"submit\">Cadastrar</button>\n");
     html.push_str("</form>");
 
     Ok(html)
@@ -139,29 +144,29 @@ fn generate_field_html(
 
     let html = match field.kind {
         FieldKind::Text => format!(
-            "<label for=\"{id}\">{label}</label>\n\
-             <input type=\"text\" id=\"{id}\" name=\"{name}\"{required}>",
+            "<label class=\"djanho-label\" for=\"{id}\">{label}</label>\n\
+             <input class=\"djanho-input\" type=\"text\" id=\"{id}\" name=\"{name}\"{required}>",
             label = field.name,
             name = field.name,
         ),
 
         FieldKind::Character => format!(
-            "<label for=\"{id}\">{label}</label>\n\
-             <input type=\"text\" id=\"{id}\" name=\"{name}\" maxlength=\"1\"{required}>",
+            "<label class=\"djanho-label\" for=\"{id}\">{label}</label>\n\
+             <input class=\"djanho-input\" type=\"text\" id=\"{id}\" name=\"{name}\" maxlength=\"1\"{required}>",
             label = field.name,
             name = field.name,
         ),
 
         FieldKind::Integer => format!(
-            "<label for=\"{id}\">{label}</label>\n\
-             <input type=\"number\" id=\"{id}\" name=\"{name}\" step=\"1\"{required}>",
+            "<label class=\"djanho-label\" for=\"{id}\">{label}</label>\n\
+             <input class=\"djanho-input\" type=\"number\" id=\"{id}\" name=\"{name}\" step=\"1\"{required}>",
             label = field.name,
             name = field.name,
         ),
 
         FieldKind::Real => format!(
-            "<label for=\"{id}\">{label}</label>\n\
-             <input type=\"number\" id=\"{id}\" name=\"{name}\" step=\"any\"{required}>",
+            "<label class=\"djanho-label\" for=\"{id}\">{label}</label>\n\
+             <input class=\"djanho-input\" type=\"number\" id=\"{id}\" name=\"{name}\" step=\"any\"{required}>",
             label = field.name,
             name = field.name,
         ),
@@ -214,8 +219,8 @@ fn generate_field_html(
 /// `true`.
 fn generate_boolean_checkbox(id: &str, name: &str) -> String {
     format!(
-        "<label for=\"{id}\">\n\
-         \x20   <input type=\"checkbox\" id=\"{id}\" name=\"{name}\" value=\"1\">\n\
+        "<label class=\"djanho-checkbox-label\" for=\"{id}\">\n\
+         \x20   <input class=\"djanho-checkbox\" type=\"checkbox\" id=\"{id}\" name=\"{name}\" value=\"1\">\n\
          \x20   {name}\n\
          </label>"
     )
@@ -247,9 +252,11 @@ fn generate_select(
     let required = if optional { "" } else { " required" };
     let mut html = String::new();
 
-    html.push_str(&format!("<label for=\"{id}\">{name}</label>\n"));
     html.push_str(&format!(
-        "<select id=\"{id}\" name=\"{name}\"{required}>\n"
+        "<label class=\"djanho-label\" for=\"{id}\">{name}</label>\n"
+    ));
+    html.push_str(&format!(
+        "<select class=\"djanho-select\" id=\"{id}\" name=\"{name}\"{required}>\n"
     ));
 
     if optional {
@@ -270,6 +277,91 @@ fn generate_select(
 
     html.push_str("</select>");
     html
+}
+
+fn generate_css() -> String {
+    r#"<style>
+.djanho-title {
+    color: #1f2937;
+    font-family: system-ui, sans-serif;
+    margin: 1.5rem auto 0.75rem;
+    max-width: 32rem;
+}
+
+.djanho-form {
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 0.5rem;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 6%);
+    box-sizing: border-box;
+    color: #1f2937;
+    font-family: system-ui, sans-serif;
+    margin: 0 auto 2rem;
+    max-width: 32rem;
+    padding: 1.5rem;
+}
+
+.djanho-label {
+    display: block;
+    font-weight: 600;
+    margin: 1rem 0 0.375rem;
+}
+
+.djanho-input,
+.djanho-select {
+    background: #ffffff;
+    border: 1px solid #9ca3af;
+    border-radius: 0.25rem;
+    box-sizing: border-box;
+    color: inherit;
+    font: inherit;
+    padding: 0.625rem 0.75rem;
+    width: 100%;
+}
+
+.djanho-input:focus,
+.djanho-select:focus {
+    border-color: #2563eb;
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
+}
+
+.djanho-checkbox-label {
+    align-items: center;
+    display: flex;
+    font-weight: 600;
+    gap: 0.5rem;
+    margin: 1rem 0;
+}
+
+.djanho-checkbox {
+    accent-color: #2563eb;
+    height: 1rem;
+    width: 1rem;
+}
+
+.djanho-submit {
+    background: #2563eb;
+    border: 0;
+    border-radius: 0.25rem;
+    color: #ffffff;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 600;
+    margin-top: 1.25rem;
+    padding: 0.625rem 1rem;
+}
+
+.djanho-submit:hover {
+    background: #1d4ed8;
+}
+
+.djanho-submit:focus-visible {
+    outline: 2px solid #1d4ed8;
+    outline-offset: 2px;
+}
+</style>"#
+        .to_string()
 }
 
 fn generate_model_schema(
