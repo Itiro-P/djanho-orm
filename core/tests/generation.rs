@@ -32,6 +32,12 @@ static PERSON_FIELDS: &[FieldEntry] = &[
         optional: false,
         references: None,
     },
+    FieldEntry {
+        name: "married",
+        kind: FieldKind::Boolean,
+        optional: false,
+        references: None,
+    },
 ];
 
 static AUTHOR_FIELDS: &[FieldEntry] = &[FieldEntry {
@@ -86,10 +92,21 @@ static PERSON: ModelEntry = ModelEntry {
 fn enum_becomes_html_select() {
     let html = generate_form(&[&PERSON], &[&GENDER]).unwrap();
 
-    assert!(html.contains("<select id=\"person-gender\" name=\"gender\" required>"));
+    assert!(html.contains(
+        "<select class=\"djanho-select\" id=\"person-gender\" name=\"gender\" required>"
+    ));
     assert!(html.contains("<option value=\"Male\">Male</option>"));
     assert!(html.contains("name=\"cpf\""));
     assert!(!html.contains("name=\"cpf\" required"));
+    assert!(html.contains("<h1 class=\"djanho-title\">"));
+    assert!(html.contains("<form class=\"djanho-form\""));
+    assert!(html.contains("class=\"djanho-label\""));
+    assert!(html.contains("class=\"djanho-input\""));
+    assert!(html.contains("class=\"djanho-checkbox-label\""));
+    assert!(html.contains("class=\"djanho-checkbox\""));
+    assert!(html.contains("<button class=\"djanho-submit\""));
+    assert!(html.contains("<style>"));
+    assert!(html.contains(".djanho-checkbox-label"));
 }
 
 #[test]

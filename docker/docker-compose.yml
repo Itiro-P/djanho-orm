@@ -1,5 +1,5 @@
 services:
-  app:
+  djanho-orm:
     build: .
     ports:
       - "8080:8000"
