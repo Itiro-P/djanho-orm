@@ -310,7 +310,7 @@ fn many_to_many_rejects_duplicate_join_table_names() {
 }
 
 #[test]
-fn form_contains_foreign_key_and_many_to_many_controls() {
+fn form_creates_a_separate_section_for_many_to_many_links() {
     static AUTHOR_TO_BOOK: ManyToManyEntry = ManyToManyEntry {
         source_model: "Author",
         field_name: "books",
@@ -321,9 +321,18 @@ fn form_contains_foreign_key_and_many_to_many_controls() {
 
     let html = generate_form_with_relations(&[&AUTHOR, &BOOK], &[], &relations).unwrap();
     assert!(html.contains("name=\"author_id\" required data-djanho-target=\"Author\""));
-    assert!(
-        html.contains("name=\"__relation__Author_Book_Link\" multiple data-djanho-target=\"Book\"")
+    assert!(html.contains(
+        "<form class=\"djanho-form\" method=\"post\" action=\"/relationships/Author_Book_Link\">"
+    ));
+    assert_eq!(
+        html.matches("name=\"author_id\" required data-djanho-target=\"Author\"")
+            .count(),
+        2
     );
+    assert!(html.contains("name=\"book_id\" required data-djanho-target=\"Book\""));
+    assert!(html.contains(">Relacionar</button>"));
+    assert!(!html.contains("__relation__Author_Book_Link"));
+    assert!(!html.contains("multiple data-djanho-target"));
 }
 
 #[test]
@@ -345,5 +354,7 @@ fn relationship_only_models_receive_tables_and_forms() {
     let html =
         generate_form_with_relations(&[&LINK_ONLY_MODEL, &AUTHOR, &BOOK], &[], &relations).unwrap();
     assert!(html.contains("action=\"/LinkOnlyModel\""));
-    assert!(html.contains("name=\"__relation__Book_LinkOnlyModel_Link\""));
+    assert!(html.contains("action=\"/relationships/Book_LinkOnlyModel_Link\""));
+    assert!(html.contains("data-djanho-target=\"LinkOnlyModel\""));
+    assert!(html.contains("data-djanho-target=\"Book\""));
 }

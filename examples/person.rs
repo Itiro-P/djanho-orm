@@ -29,7 +29,8 @@ struct NotEmpty {
 
 #[derive(Djanho)]
 struct Author {
-    name: String,
+    refe: String,
+    age: String,
 }
 
 #[derive(Djanho)]
@@ -38,6 +39,23 @@ struct Book {
     // Esta chave estrangeira cria uma relação 1:N: um autor pode ter vários livros.
     #[djanho(foreign_key = "Author")]
     author_id: i32,
+}
+
+// Relação N:N: um aluno pode estar em várias disciplinas e uma disciplina pode
+// ter vários alunos. O campo Vec<T> indica a tabela de associação gerada pelo
+// Djanho.
+#[derive(Djanho)]
+struct Student {
+    name: String,
+    #[djanho(many_to_many = "Course")]
+    courses: Vec<Course>,
+}
+
+#[derive(Djanho)]
+struct Course {
+    name: String,
+    #[djanho(many_to_many = "Student")]
+    students: Vec<Student>,
 }
 
 // Models sem campos também são permitidos, embora normalmente seja melhor

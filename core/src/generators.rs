@@ -92,7 +92,7 @@ pub fn generate_form(entries: &[&ModelEntry], choices: &[&ChoiceEntry]) -> Resul
     generate_form_with_relations(entries, choices, &[])
 }
 
-/// Gera formulários com controles para foreign keys e relacionamentos N:N.
+/// Gera formulários para models e seções separadas para relacionamentos N:N.
 pub fn generate_form_with_relations(
     entries: &[&ModelEntry],
     choices: &[&ChoiceEntry],
@@ -101,8 +101,8 @@ pub fn generate_form_with_relations(
     let mut forms = Vec::new();
 
     for entry in entries {
-        // Um model sem campos comuns ainda precisa de formulário se participa
-        // de uma relação N:N, pois o utilizador pode criar seus vínculos.
+        // Models sem campos ainda precisam de um formulário para criar
+        // registros que depois poderão ser associados na seção N:N.
         let has_many_to_many = relations.iter().any(|relation| {
             relation.left_model == entry.name || relation.right_model == entry.name
         });
@@ -110,11 +110,18 @@ pub fn generate_form_with_relations(
             continue;
         }
 
-        forms.push(generate_model_form(entry, choices, relations)?);
+        forms.push(generate_model_form(entry, choices)?);
     }
 
-    // O CSS é incluído uma vez ao final, compartilhado por todos os formulários.
+    for relation in relations {
+        forms.push(generate_many_to_many_form(relation));
+    }
+
+    // CSS e script são incluídos uma vez ao final, compartilhados por todos
+    // os formulários. O script transforma os selects relacionais em dropdowns
+    // com pesquisa.
     forms.push(generate_css());
+    forms.push(generate_script());
 
     Ok(forms.join("\n\n"))
 }
@@ -265,11 +272,7 @@ fn order_by_dependency<'a>(entries: &[&'a ModelEntry]) -> Vec<&'a ModelEntry> {
 }
 
 /// Gera um formulário completo para um model, incluindo campos e relações.
-fn generate_model_form(
-    entry: &ModelEntry,
-    choices: &[&ChoiceEntry],
-    relations: &[ManyToManyRelation],
-) -> Result<String, String> {
+fn generate_model_form(entry: &ModelEntry, choices: &[&ChoiceEntry]) -> Result<String, String> {
     let route = entry.name;
     let mut html = String::new();
 
@@ -293,21 +296,37 @@ fn generate_model_form(
         }
     }
 
-    for relation in relations {
-        // O formulário apresenta o outro lado da relação para permitir
-        // selecionar os registros que serão associados ao novo registro.
-        if relation.left_model == entry.name {
-            append_many_to_many_control(&mut html, relation, &relation.right_model);
-        }
-        if relation.right_model == entry.name && relation.left_model != entry.name {
-            append_many_to_many_control(&mut html, relation, &relation.left_model);
-        }
-    }
-
     html.push_str("    <button class=\"djanho-submit\" type=\"submit\">Cadastrar</button>\n");
     html.push_str("</form>");
 
     Ok(html)
+}
+
+/// Gera uma seção independente para associar dois registros já cadastrados.
+fn generate_many_to_many_form(relation: &ManyToManyRelation) -> String {
+    let mut html = format!(
+        "<h1 class=\"djanho-title\">Relacionar {} e {}</h1>\n\
+         <form class=\"djanho-form\" method=\"post\" action=\"/relationships/{}\">\n",
+        relation.left_model, relation.right_model, relation.name
+    );
+
+    for (model, field) in [
+        (&relation.left_model, &relation.left_field),
+        (&relation.right_model, &relation.right_field),
+    ] {
+        let id = format!("{}-{field}", relation.name.to_lowercase());
+        html.push_str(&format!(
+            "    <label class=\"djanho-label\" for=\"{id}\">{model}</label>\n\
+             \x20   <select class=\"djanho-select\" id=\"{id}\" name=\"{field}\" required \
+             data-djanho-target=\"{model}\">\n\
+             \x20       <option value=\"\" disabled selected>Selecione...</option>\n\
+             \x20   </select>\n"
+        ));
+    }
+
+    html.push_str("    <button class=\"djanho-submit\" type=\"submit\">Relacionar</button>\n");
+    html.push_str("</form>");
+    html
 }
 
 /// Escolhe e gera o controle HTML adequado ao tipo de um campo.
@@ -401,19 +420,10 @@ fn generate_field_html(
     Ok(html)
 }
 
-/// Adiciona um seletor múltiplo para escolher registros de uma relação N:N.
-fn append_many_to_many_control(html: &mut String, relation: &ManyToManyRelation, target: &str) {
-    let id = format!("{}-{}", target.to_lowercase(), relation.name.to_lowercase());
-    html.push_str(&format!(
-        "    <label class=\"djanho-label\" for=\"{id}\">{target}</label>\n\
-         \x20   <select class=\"djanho-select\" id=\"{id}\" name=\"__relation__{}\" \
-         multiple data-djanho-target=\"{target}\">\n\
-         \x20   </select>\n",
-        relation.name
-    ));
-}
-
 /// Cria um `<select>` cujas opções serão preenchidas pelo servidor Python.
+///
+/// O que é enviado é apenas o id (`value`) do registro escolhido. O texto da
+/// opção serve só para o usuário identificar o registro.
 fn generate_foreign_key_select(id: &str, name: &str, optional: bool, target: &str) -> String {
     let required = if optional { "" } else { " required" };
     let mut html = format!(
@@ -586,7 +596,215 @@ fn generate_css() -> String {
     outline: 2px solid #1d4ed8;
     outline-offset: 2px;
 }
+
+/* Dropdown com pesquisa para selects relacionais (1:N e N:N). */
+.djanho-combo {
+    position: relative;
+}
+
+/* O select original continua no formulário (é ele que é enviado), mas fica
+   invisível. Não usamos display:none para a validação `required` funcionar. */
+.djanho-select.djanho-combo-native {
+    border: 0;
+    bottom: 0;
+    height: 1px;
+    left: 0;
+    opacity: 0;
+    padding: 0;
+    pointer-events: none;
+    position: absolute;
+    width: 100%;
+}
+
+.djanho-combo-button {
+    background: #ffffff;
+    border: 1px solid #9ca3af;
+    border-radius: 0.25rem;
+    box-sizing: border-box;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    overflow: hidden;
+    padding: 0.625rem 0.75rem;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+}
+
+.djanho-combo-button:focus-visible {
+    border-color: #2563eb;
+    outline: 2px solid #2563eb;
+    outline-offset: 1px;
+}
+
+.djanho-combo-panel {
+    background: #ffffff;
+    border: 1px solid #9ca3af;
+    border-radius: 0.25rem;
+    box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+    box-sizing: border-box;
+    left: 0;
+    margin-top: 0.25rem;
+    padding: 0.5rem;
+    position: absolute;
+    right: 0;
+    top: 100%;
+    z-index: 10;
+}
+
+.djanho-combo-list {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    max-height: 12rem;
+    overflow-y: auto;
+    padding: 0;
+}
+
+.djanho-combo-item {
+    border-radius: 0.25rem;
+    cursor: pointer;
+    padding: 0.5rem 0.625rem;
+}
+
+.djanho-combo-item:hover {
+    background: #f3f4f6;
+}
+
+.djanho-combo-item.selected {
+    background: #dbeafe;
+    font-weight: 600;
+}
+
+.djanho-combo-empty {
+    color: #6b7280;
+    padding: 0.5rem 0.625rem;
+}
 </style>"#
+        .to_string()
+}
+
+/// Retorna o script que transforma os selects relacionais em dropdowns com
+/// pesquisa.
+///
+/// Todo `<select data-djanho-target>` é escondido e substituído por um botão
+/// que abre um painel com campo de busca e lista de opções. As escolhas são
+/// gravadas de volta no select original; por isso o envio do formulário e o
+/// código do servidor não mudam: continua indo apenas o id de cada registro.
+/// O campo de busca não tem `name`, então nunca é enviado.
+fn generate_script() -> String {
+    r#"<script>
+(function () {
+    function enhance(select) {
+        if (select.dataset.djanhoReady) return;
+        select.dataset.djanhoReady = '1';
+
+        const multiple = select.multiple;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'djanho-combo';
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'djanho-combo-button';
+
+        const panel = document.createElement('div');
+        panel.className = 'djanho-combo-panel';
+        panel.hidden = true;
+
+        const search = document.createElement('input');
+        search.type = 'search';
+        search.className = 'djanho-input';
+        search.placeholder = 'Pesquisar...';
+
+        const list = document.createElement('ul');
+        list.className = 'djanho-combo-list';
+
+        panel.append(search, list);
+        wrapper.append(button, panel);
+        select.classList.add('djanho-combo-native');
+        select.tabIndex = -1;
+        select.after(wrapper);
+
+        function updateLabel() {
+            if (multiple) {
+                const chosen = Array.from(select.selectedOptions);
+                button.textContent = chosen.length
+                    ? chosen.map((option) => option.text).join(', ')
+                    : 'Selecione...';
+            } else {
+                const chosen = select.selectedOptions[0];
+                button.textContent = chosen ? chosen.text : 'Selecione...';
+            }
+        }
+
+        function render() {
+            const term = search.value.trim().toLowerCase();
+            list.textContent = '';
+            let shown = 0;
+
+            Array.from(select.options).forEach((option) => {
+                if (option.disabled) return;
+                if (!option.text.toLowerCase().includes(term)) return;
+
+                const item = document.createElement('li');
+                item.className = 'djanho-combo-item' + (option.selected ? ' selected' : '');
+                item.textContent = option.text;
+                item.addEventListener('click', () => {
+                    if (multiple) {
+                        option.selected = !option.selected;
+                    } else {
+                        select.value = option.value;
+                        close();
+                    }
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    updateLabel();
+                    render();
+                });
+                list.append(item);
+                shown += 1;
+            });
+
+            if (!shown) {
+                const empty = document.createElement('li');
+                empty.className = 'djanho-combo-empty';
+                empty.textContent = 'Nenhum resultado';
+                list.append(empty);
+            }
+        }
+
+        function open() {
+            panel.hidden = false;
+            search.value = '';
+            render();
+            search.focus();
+        }
+
+        function close() {
+            panel.hidden = true;
+        }
+
+        button.addEventListener('click', () => (panel.hidden ? open() : close()));
+        search.addEventListener('input', render);
+        search.addEventListener('keydown', (event) => {
+            // Enter na busca não deve enviar o formulário.
+            if (event.key === 'Enter') event.preventDefault();
+            if (event.key === 'Escape') {
+                close();
+                button.focus();
+            }
+        });
+        document.addEventListener('click', (event) => {
+            if (!wrapper.contains(event.target)) close();
+        });
+
+        updateLabel();
+    }
+
+    document
+        .querySelectorAll('select[data-djanho-target]')
+        .forEach(enhance);
+})();
+</script>"#
         .to_string()
 }
 
@@ -735,9 +953,9 @@ fn generate_many_to_many_schema(
     Ok(format!(
         "-- Relacionamento N:N: {} <-> {}\n\
          CREATE TABLE IF NOT EXISTS {} (\n\
-             {} INTEGER NOT NULL REFERENCES {}(id),\n\
-             {} INTEGER NOT NULL REFERENCES {}(id),\n\
-             PRIMARY KEY ({}, {}){}\n\
+            \t{} INTEGER NOT NULL REFERENCES {}(id),\n\
+            \t{} INTEGER NOT NULL REFERENCES {}(id),\n\
+            \tPRIMARY KEY ({}, {}){}\n\
          );",
         relation.left_model,
         relation.right_model,

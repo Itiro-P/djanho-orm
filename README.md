@@ -59,9 +59,9 @@ struct Livro {
 Também é possível relacionar fichas do mesmo tipo, como um funcionário com
 outros funcionários.
 
-Os formulários mostram fichas já cadastradas para escolher nas relações. Ao
-enviar o formulário, o servidor demonstrativo salva a ficha e os vínculos
-selecionados no banco SQLite.
+O formulário de cada ficha serve para cadastrá-la. Para cada relação N:N, o
+gerador cria uma seção separada com dois seletores de fichas já cadastradas;
+ao enviar, o servidor demonstrativo salva o vínculo entre elas no SQLite.
 
 ### Rotas HTTP
 
@@ -69,3 +69,5 @@ selecionados no banco SQLite.
   registros filhos de uma relação 1:N.
 - `GET /Modelo/{id}/related/TabelaIntermediaria`: lista os registros
   relacionados por uma associação N:N.
+- `POST /relationships/TabelaIntermediaria`: associa dois registros existentes
+  usando os campos definidos pela tabela intermediária.

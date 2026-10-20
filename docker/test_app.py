@@ -67,7 +67,64 @@ class RelationshipBackendTests(unittest.TestCase):
         os.unlink(self.database)
 
     def test_create_parent_and_n_to_n_links(self):
-        """Confirma que o POST grava o registro e seu vínculo N:N."""
+        """Confirma que uma seção separada associa dois registros existentes."""
+        with closing(sqlite3.connect(app.DB)) as connection:
+            student_id = connection.execute(
+                "INSERT INTO Student (name) VALUES (?)", ("Ana",)
+            ).lastrowid
+            course_id = connection.execute(
+                "INSERT INTO Course (title) VALUES (?)", ("Rust",)
+            ).lastrowid
+            connection.commit()
+
+        app.insert_relationship(
+            "Student_Course_Link",
+            {
+                "student_id": [str(student_id)],
+                "course_id": [str(course_id)],
+            },
+        )
+
+        related = app.fetch_related("Student", student_id, "Student_Course_Link")
+        self.assertEqual([row["title"] for row in related], ["Rust"])
+
+    def test_relationship_section_rejects_missing_or_same_self_record(self):
+        """Uma seção N:N exige dois registros válidos e distintos."""
+        with self.assertRaises(ValueError):
+            app.insert_relationship("Student_Course_Link", {"student_id": ["1"]})
+
+        with closing(sqlite3.connect(app.DB)) as connection:
+            employee_ids = [
+                connection.execute(
+                    "INSERT INTO Employee (name) VALUES (?)", (name,)
+                ).lastrowid
+                for name in ("Ana", "Bia")
+            ]
+            connection.commit()
+
+        app.insert_relationship(
+            "Employee_Employee_Link",
+            {
+                "source_id": [str(employee_ids[1])],
+                "target_id": [str(employee_ids[0])],
+            },
+        )
+        related = app.fetch_related(
+            "Employee", employee_ids[0], "Employee_Employee_Link"
+        )
+        self.assertEqual([row["name"] for row in related], ["Bia"])
+
+        with self.assertRaises(ValueError):
+            app.insert_relationship(
+                "Employee_Employee_Link",
+                {
+                    "source_id": [str(employee_ids[0])],
+                    "target_id": [str(employee_ids[0])],
+                },
+            )
+
+    def test_http_post_and_relationship_routes(self):
+        """Exercita cadastro, associação N:N e consultas pela interface HTTP."""
         with closing(sqlite3.connect(app.DB)) as connection:
             course_id = connection.execute(
                 "INSERT INTO Course (title) VALUES (?)", ("Rust",)
@@ -247,18 +304,26 @@ class RelationshipBackendTests(unittest.TestCase):
             client.request(
                 "POST",
                 "/Student",
-                urlencode(
-                    {
-                        "name": "Ana",
-                        "__relation__Student_Course_Link": str(course_id),
-                    }
-                ),
+                urlencode({"name": "Ana"}),
                 {"Content-Type": "application/x-www-form-urlencoded"},
             )
             self.assertEqual(client.getresponse().status, 303)
 
             with closing(sqlite3.connect(app.DB)) as connection:
                 student_id = connection.execute("SELECT id FROM Student").fetchone()[0]
+
+            client.request(
+                "POST",
+                "/relationships/Student_Course_Link",
+                urlencode(
+                    {
+                        "student_id": str(student_id),
+                        "course_id": str(course_id),
+                    }
+                ),
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            self.assertEqual(client.getresponse().status, 303)
 
             client.request(
                 "GET", f"/Student/{student_id}/related/Student_Course_Link"

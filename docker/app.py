@@ -79,6 +79,7 @@ def build_query(
                 raise ValueError(f"campo obrigatório ausente: {name}")
             value = None
         elif "INT" in ctype:
+            # Chaves estrangeiras (1:N) chegam aqui: só o id é enviado.
             value = int(raw[-1])
         elif any(t in ctype for t in ("REAL", "FLOA", "DOUB")):
             value = float(raw[-1])
@@ -164,6 +165,9 @@ def insert_record(
                 f"{quote_identifier(target_column)}) DO NOTHING"
             )
             for raw_id in related_ids:
+                # Valores vazios não representam vínculo; ignorar em vez de falhar.
+                if raw_id == "":
+                    continue
                 try:
                     related_id = int(raw_id)
                 except ValueError as error:
@@ -182,6 +186,45 @@ def insert_record(
         return record_id
 
 
+def insert_relationship(table: str, data: Mapping[str, list[str]]) -> None:
+    """Associa dois registros existentes por uma tabela de ligação N:N."""
+    with closing(sqlite3.connect(DB)) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        references = get_link_foreign_keys(table, connection)
+        related_ids: dict[str, int] = {}
+
+        for column, _ in references:
+            raw_values = data.get(column)
+            if not raw_values or raw_values[-1] == "":
+                raise ValueError(f"registro relacionado ausente: {column}")
+            try:
+                related_id = int(raw_values[-1])
+            except ValueError as error:
+                raise ValueError(f"id relacionado inválido: {column}") from error
+            if related_id <= 0:
+                raise ValueError(f"id relacionado inválido: {column}")
+            related_ids[column] = related_id
+
+        if references[0][1] == references[1][1]:
+            if not {"source_id", "target_id"}.issubset(related_ids):
+                raise ValueError(f"tabela de autorrelação '{table}' inválida")
+            if related_ids["source_id"] == related_ids["target_id"]:
+                raise ValueError("um registro não pode se relacionar consigo mesmo")
+            columns = ["source_id", "target_id"]
+            values = sorted(related_ids[column] for column in columns)
+        else:
+            columns = [column for column, _ in references]
+            values = [related_ids[column] for column in columns]
+
+        quoted_columns = [quote_identifier(column) for column in columns]
+        connection.execute(
+            f"INSERT INTO {quote_identifier(table)} ({', '.join(quoted_columns)}) "
+            f"VALUES (?, ?) ON CONFLICT DO NOTHING",
+            values,
+        )
+        connection.commit()
+
+
 def fetch_rows(table: str) -> list[dict]:
     """Retorna todas as linhas de uma tabela como uma lista de dicionários."""
     with closing(sqlite3.connect(DB)) as con:
@@ -191,7 +234,12 @@ def fetch_rows(table: str) -> list[dict]:
 
 
 def populate_form_options(form: str) -> str:
-    """Preenche os selects relacionais no HTML antes de enviar ao navegador."""
+    """Preenche os selects relacionais no HTML antes de enviar ao navegador.
+
+    O value de cada opção é sempre o id do registro, que é o único dado
+    enviado no POST. O texto serve só para o usuário reconhecer o registro
+    (e é o que a pesquisa do dropdown filtra).
+    """
     pattern = re.compile(
         r'(<select\b(?=[^>]*\bdata-djanho-target="([^"]+)")[^>]*>)'
         r"(.*?)</select>",
@@ -210,18 +258,25 @@ def populate_form_options(form: str) -> str:
             if "id" not in column_names:
                 raise ValueError(f"model relacionado '{target}' não possui coluna id")
 
+            # A coluna descritiva é opcional: sem ela, o texto é só o id.
             display_column = next(
                 (name for name in ("name", "title", "label") if name in column_names),
-                "id",
+                None,
             )
-            rows = connection.execute(
-                f"SELECT id, {quote_identifier(display_column)} "
-                f"FROM {quote_identifier(target)} ORDER BY id"
-            ).fetchall()
+            if display_column is None:
+                rows = connection.execute(
+                    f"SELECT id, NULL FROM {quote_identifier(target)} ORDER BY id"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    f"SELECT id, {quote_identifier(display_column)} "
+                    f"FROM {quote_identifier(target)} ORDER BY id"
+                ).fetchall()
 
         options = "".join(
             f'<option value="{html.escape(str(record_id), quote=True)}">'
-            f"{html.escape(str(label))}</option>"
+            f"{html.escape(str(record_id) if label is None else f'{record_id} — {label}')}"
+            "</option>"
             for record_id, label in rows
         )
         return f"{match.group(1)}{match.group(3)}{options}</select>"
@@ -369,10 +424,25 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, "application/json; charset=utf-8", body)
 
     def do_POST(self):
-        """Lê um formulário, salva o registro e responde com redirecionamento."""
+        """Salva um registro ou um vínculo N:N e redireciona ao formulário."""
         size = int(self.headers.get("Content-Length", 0))
         data = parse_qs(self.rfile.read(size).decode())
         parts = [part for part in unquote(urlsplit(self.path).path).split("/") if part]
+
+        if len(parts) == 2 and parts[0] == "relationships":
+            try:
+                insert_relationship(parts[1], data)
+            except (ValueError, sqlite3.Error) as error:
+                print("erro:", error, flush=True)
+                self._status(400)
+                return
+
+            self.send_response(303)
+            self.send_header("Location", "/form")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         if len(parts) != 1:
             self._status(404)
             return
