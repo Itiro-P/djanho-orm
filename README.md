@@ -1,11 +1,19 @@
 # djanho-orm
-O Djanho ORM é um mapeador objeto-relacional que gera arquivos SQL e formulários HTML.
+
+O Djanho ajuda a transformar as fichas descritas no código Rust em tabelas
+para o banco SQLite e formulários HTML. Por exemplo, uma ficha `Pessoa` com
+nome e idade pode virar uma tabela para guardar pessoas e um formulário para
+cadastrar uma.
+
+> Apesar do nome ORM, o projeto ainda não oferece uma ferramenta Rust completa
+> para consultar e editar objetos no banco. Ele gera o schema (as instruções
+> para criar as tabelas), os formulários e inclui um servidor demonstrativo.
 
 ## Relacionamentos
 
-O gerador de esquema oferece suporte a relacionamentos um-para-muitos (1:N)
-por meio de uma chave estrangeira no modelo do lado "muitos". Chaves
-estrangeiras opcionais são representadas com `Option`:
+Um relacionamento diz como fichas de tipos diferentes se conectam. Em uma
+relação 1:N, por exemplo, um professor pode ter várias turmas. Cada turma
+guarda o número identificador do professor:
 
 ```rust
 #[derive(Djanho)]
@@ -20,8 +28,9 @@ struct Turma {
 }
 ```
 
-Relacionamentos muitos-para-muitos (N:N) usam um campo `Vec<Modelo>` anotado
-com `many_to_many`:
+Em uma relação N:N, vários alunos podem fazer várias disciplinas. O campo
+`Vec<Disciplina>` indica que um aluno pode estar ligado a uma lista de
+disciplinas:
 
 ```rust
 #[derive(Djanho)]
@@ -31,12 +40,11 @@ struct Aluno {
 }
 ```
 
-O tipo referenciado e o valor do atributo precisam indicar o mesmo modelo. A
-relação pode ser declarada em um ou nos dois modelos; declarar as duas
-direções ainda gera apenas uma tabela intermediária, com chaves estrangeiras
-e chave primária composta. Para criar várias associações entre o mesmo par de
-modelos, dê um nome a cada relação com `relation` e use o mesmo nome nas
-declarações inversas:
+O tipo dentro de `Vec` e o nome em `many_to_many` precisam coincidir. O Djanho
+cria uma tabela intermediária para guardar os pares de identificadores. A
+relação pode ser declarada em um lado ou nos dois; se for declarada nos dois,
+o Djanho ainda cria somente uma tabela. Se duas pessoas podem ter mais de um
+tipo de relação com o mesmo model, use `relation` para dar nomes diferentes:
 
 ```rust
 #[derive(Djanho)]
@@ -48,14 +56,12 @@ struct Livro {
 }
 ```
 
-Também há suporte a relações N:N autorreferentes. Por exemplo, um campo
-`Vec<Funcionario>` pode ser anotado com
-`many_to_many = "Funcionario"`. Ao consultar essa relação, a associação é
-considerada simétrica.
+Também é possível relacionar fichas do mesmo tipo, como um funcionário com
+outros funcionários.
 
-Os formulários gerados carregam do banco as opções de chaves estrangeiras e
-relacionamentos N:N. Ao enviar um formulário, o backend salva o registro e
-os vínculos selecionados.
+Os formulários mostram fichas já cadastradas para escolher nas relações. Ao
+enviar o formulário, o servidor demonstrativo salva a ficha e os vínculos
+selecionados no banco SQLite.
 
 ### Rotas HTTP
 
