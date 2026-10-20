@@ -1,11 +1,29 @@
 use crate::choice_entry::ChoiceEntry;
 use crate::model_entry::{FieldEntry, FieldKind, ModelEntry};
 
+/// Representa um relacionamento muitos-para-muitos (N:N).
+///
+/// Exemplo: vários alunos podem cursar várias disciplinas.
+#[derive(Debug, Clone)]
+pub struct ManyToManyRelation {
+    /// Nome da tabela intermediária.
+    pub name: String,
+
+    /// Primeiro modelo do relacionamento.
+    pub left_model: String,
+
+    /// Nome da coluna que referencia o primeiro modelo.
+    pub left_field: String,
+
+    /// Segundo modelo do relacionamento.
+    pub right_model: String,
+
+    /// Nome da coluna que referencia o segundo modelo.
+    pub right_field: String,
+}
+
 /// Gera o HTML unificado para todos os modelos registrados.
-pub fn generate_form(
-    entries: &[&ModelEntry],
-    choices: &[&ChoiceEntry],
-) -> Result<String, String> {
+pub fn generate_form(entries: &[&ModelEntry], choices: &[&ChoiceEntry]) -> Result<String, String> {
     let mut forms = Vec::new();
 
     for entry in entries {
@@ -21,21 +39,29 @@ pub fn generate_form(
     Ok(forms.join("\n\n"))
 }
 
-/// Gera o SQL unificado para todos os modelos registrados.
+/// Gera o SQL unificado para todos os modelos e
+/// relacionamentos muitos-para-muitos registrados.
 pub fn generate_schema(
     entries: &[&ModelEntry],
     choices: &[&ChoiceEntry],
+    relations: &[ManyToManyRelation],
 ) -> Result<String, String> {
     validate_references(entries)?;
 
     let mut schemas = Vec::new();
 
+    // Gera primeiro as tabelas dos modelos.
     for entry in order_by_dependency(entries) {
         if entry.fields.is_empty() {
             continue;
         }
 
         schemas.push(generate_model_schema(entry, choices)?);
+    }
+
+    // Gera as tabelas intermediárias dos relacionamentos N:N.
+    for relation in relations {
+        schemas.push(generate_many_to_many_schema(relation, entries)?);
     }
 
     Ok(schemas.join("\n\n"))
@@ -79,8 +105,7 @@ fn order_by_dependency<'a>(entries: &[&'a ModelEntry]) -> Vec<&'a ModelEntry> {
             let ready = entry.fields.iter().all(|field| match field.references {
                 None => true,
                 Some(target) => {
-                    target == entry.name
-                        || ordered.iter().any(|done| done.name == target)
+                    target == entry.name || ordered.iter().any(|done| done.name == target)
                 }
             });
 
@@ -102,10 +127,7 @@ fn order_by_dependency<'a>(entries: &[&'a ModelEntry]) -> Vec<&'a ModelEntry> {
     ordered
 }
 
-fn generate_model_form(
-    entry: &ModelEntry,
-    choices: &[&ChoiceEntry],
-) -> Result<String, String> {
+fn generate_model_form(entry: &ModelEntry, choices: &[&ChoiceEntry]) -> Result<String, String> {
     let route = entry.name;
     let mut html = String::new();
 
@@ -175,9 +197,7 @@ fn generate_field_html(
         // navegador; o backend deve interpretar ausência como false e presença
         // com value="1" como true. Não usamos `required`, pois isso obrigaria
         // o usuário a marcar o checkbox e tornaria false impossível.
-        FieldKind::Boolean if !field.optional => {
-            generate_boolean_checkbox(&id, field.name)
-        }
+        FieldKind::Boolean if !field.optional => generate_boolean_checkbox(&id, field.name),
 
         // Option<bool> possui três estados: None, Some(true) e Some(false).
         // Um checkbox sozinho não consegue representar os três, então usamos
@@ -202,7 +222,11 @@ fn generate_field_html(
                 &id,
                 field.name,
                 field.optional,
-                if field.optional { "Nenhum" } else { "Selecione..." },
+                if field.optional {
+                    "Nenhum"
+                } else {
+                    "Selecione..."
+                },
                 &options,
             )
         }
@@ -260,9 +284,7 @@ fn generate_select(
     ));
 
     if optional {
-        html.push_str(&format!(
-            "    <option value=\"\">{empty_label}</option>\n"
-        ));
+        html.push_str(&format!("    <option value=\"\">{empty_label}</option>\n"));
     } else {
         html.push_str(&format!(
             "    <option value=\"\" disabled selected>{empty_label}</option>\n"
@@ -270,9 +292,7 @@ fn generate_select(
     }
 
     for (value, label) in options {
-        html.push_str(&format!(
-            "    <option value=\"{value}\">{label}</option>\n"
-        ));
+        html.push_str(&format!("    <option value=\"{value}\">{label}</option>\n"));
     }
 
     html.push_str("</select>");
@@ -364,10 +384,7 @@ fn generate_css() -> String {
         .to_string()
 }
 
-fn generate_model_schema(
-    entry: &ModelEntry,
-    choices: &[&ChoiceEntry],
-) -> Result<String, String> {
+fn generate_model_schema(entry: &ModelEntry, choices: &[&ChoiceEntry]) -> Result<String, String> {
     let mut columns = vec!["    id INTEGER PRIMARY KEY".to_string()];
 
     for field in entry.fields {
@@ -423,10 +440,7 @@ fn generate_sql_column(
             })?;
 
             if choice.variants.is_empty() {
-                return Err(format!(
-                    "O enum '{}' não possui variantes",
-                    choice.name
-                ));
+                return Err(format!("O enum '{}' não possui variantes", choice.name));
             }
 
             let accepted_values = choice
@@ -450,12 +464,66 @@ fn generate_sql_column(
     Ok(column)
 }
 
-fn find_choice<'a>(
-    choices: &'a [&ChoiceEntry],
-    name: &str,
-) -> Option<&'a ChoiceEntry> {
-    choices
+fn find_choice<'a>(choices: &'a [&ChoiceEntry], name: &str) -> Option<&'a ChoiceEntry> {
+    choices.iter().copied().find(|choice| choice.name == name)
+}
+
+/// Gera a tabela intermediária de um relacionamento N:N.
+fn generate_many_to_many_schema(
+    relation: &ManyToManyRelation,
+    entries: &[&ModelEntry],
+) -> Result<String, String> {
+    let left_exists = entries
         .iter()
-        .copied()
-        .find(|choice| choice.name == name)
+        .any(|entry| entry.name == relation.left_model && !entry.fields.is_empty());
+
+    let right_exists = entries
+        .iter()
+        .any(|entry| entry.name == relation.right_model && !entry.fields.is_empty());
+
+    if !left_exists {
+        return Err(format!(
+            "O modelo '{}' do relacionamento '{}' não foi registrado",
+            relation.left_model, relation.name
+        ));
+    }
+
+    if !right_exists {
+        return Err(format!(
+            "O modelo '{}' do relacionamento '{}' não foi registrado",
+            relation.right_model, relation.name
+        ));
+    }
+
+    if relation.left_model == relation.right_model {
+        return Err(format!(
+            "O relacionamento '{}' aponta para o mesmo modelo nos dois lados",
+            relation.name
+        ));
+    }
+
+    if relation.left_field == relation.right_field {
+        return Err(format!(
+            "O relacionamento '{}' usa o mesmo nome de coluna nos dois lados",
+            relation.name
+        ));
+    }
+
+    Ok(format!(
+        "-- Relacionamento N:N: {} <-> {}\n\
+         CREATE TABLE IF NOT EXISTS {} (\n\
+             {} INTEGER NOT NULL REFERENCES {}(id),\n\
+             {} INTEGER NOT NULL REFERENCES {}(id),\n\
+             PRIMARY KEY ({}, {})\n\
+         );",
+        relation.left_model,
+        relation.right_model,
+        relation.name,
+        relation.left_field,
+        relation.left_model,
+        relation.right_field,
+        relation.right_model,
+        relation.left_field,
+        relation.right_field
+    ))
 }

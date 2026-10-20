@@ -15,31 +15,41 @@ inventory::collect!(choice_entry::ChoiceEntry);
 /// Junta os metadados registrados por `Djanho` e `DjanhoChoice` e cria
 /// `docker/schema.sql` e `docker/form.html`.
 pub fn generate() -> io::Result<()> {
-    let mut entries: Vec<&model_entry::ModelEntry> =
-        inventory::iter::<model_entry::ModelEntry>
-            .into_iter()
-            .collect();
+    let mut entries: Vec<&model_entry::ModelEntry> = inventory::iter::<model_entry::ModelEntry>
+        .into_iter()
+        .collect();
 
-    let mut choices: Vec<&choice_entry::ChoiceEntry> =
-        inventory::iter::<choice_entry::ChoiceEntry>
-            .into_iter()
-            .collect();
+    let mut choices: Vec<&choice_entry::ChoiceEntry> = inventory::iter::<choice_entry::ChoiceEntry>
+        .into_iter()
+        .collect();
 
     entries.sort_by_key(|entry| entry.name);
     choices.sort_by_key(|choice| choice.name);
 
+    // Relacionamentos N:N configurados manualmente.
+    // Adicione relações aqui quando os dois modelos existirem.
+    let relations: Vec<generators::ManyToManyRelation> = vec![
+        // Exemplo para habilitar quando os modelos estiverem registrados:
+        //
+        // generators::ManyToManyRelation {
+        //     name: "Aluno_Disciplina".to_string(),
+        //     left_model: "Aluno".to_string(),
+        //     left_field: "aluno_id".to_string(),
+        //     right_model: "Disciplina".to_string(),
+        //     right_field: "disciplina_id".to_string(),
+        // },
+    ];
+
     let html_content = generators::generate_form(&entries, &choices)
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
 
-    let sql_content = generators::generate_schema(&entries, &choices)
+    let sql_content = generators::generate_schema(&entries, &choices, &relations)
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
 
     // A pasta `docker/` já faz parte da estrutura do projeto.
-    File::create("docker/form.html")?
-        .write_all(html_content.as_bytes())?;
+    File::create("docker/form.html")?.write_all(html_content.as_bytes())?;
 
-    File::create("docker/schema.sql")?
-        .write_all(sql_content.as_bytes())?;
+    File::create("docker/schema.sql")?.write_all(sql_content.as_bytes())?;
 
     Ok(())
 }

@@ -31,7 +31,11 @@ pub struct FieldMetadata {
 
 impl FieldMetadata {
     pub fn new(name: String, target_type: Type, references: Option<String>) -> Self {
-        Self { name, target_type, references }
+        Self {
+            name,
+            target_type,
+            references,
+        }
     }
 
     /// Interpreta o tipo Rust do campo para o conjunto de tipos suportados
@@ -42,11 +46,7 @@ impl FieldMetadata {
 
     pub fn print(&self) {
         let ty = &self.target_type;
-        println!(
-            "Name -> {}; Type -> {}.",
-            self.name,
-            quote::quote!(#ty)
-        );
+        println!("Name -> {}; Type -> {}.", self.name, quote::quote!(#ty));
     }
 }
 
@@ -146,8 +146,7 @@ fn classify_base_type(ty: &Type) -> Option<FieldTypeMetadata> {
         "String" => FieldTypeMetadata::Text,
         "char" => FieldTypeMetadata::Character,
 
-        "i8" | "i16" | "i32" | "i64" | "isize"
-        | "u8" | "u16" | "u32" | "u64" | "usize" => {
+        "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64" | "usize" => {
             FieldTypeMetadata::Integer
         }
 

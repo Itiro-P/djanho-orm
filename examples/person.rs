@@ -17,7 +17,7 @@ struct Person {
 }
 
 #[derive(Djanho)]
-struct NotEmpty{
+struct NotEmpty {
     something_str: String,
     something_i32: i32,
     something_f64: f64,

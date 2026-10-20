@@ -1,11 +1,7 @@
-use djanho_core::metadata::{
-    FieldMetadata,
-    FieldTypeMetadata,
-    StructMetadata,
-};
+use djanho_core::metadata::{FieldMetadata, FieldTypeMetadata, StructMetadata};
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields};
+use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
 /// Lê `#[djanho(foreign_key = "Model")]` de um campo.
 fn parse_references(field: &syn::Field) -> syn::Result<Option<String>> {
@@ -49,12 +45,9 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
             }
         },
         _ => {
-            return syn::Error::new_spanned(
-                &ast,
-                "Djanho só pode ser usado em structs",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new_spanned(&ast, "Djanho só pode ser usado em structs")
+                .to_compile_error()
+                .into();
         }
     };
 
@@ -86,8 +79,7 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
         ));
     }
 
-    let struct_metadata =
-        StructMetadata::new(struct_name.to_string(), fields);
+    let struct_metadata = StructMetadata::new(struct_name.to_string(), fields);
 
     let mut generated_fields = Vec::new();
 
@@ -107,9 +99,7 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
         let field_name = &field.name;
         let optional = type_metadata.optional;
 
-        if field.references.is_some()
-            && type_metadata.field_type != FieldTypeMetadata::Integer
-        {
+        if field.references.is_some() && type_metadata.field_type != FieldTypeMetadata::Integer {
             return syn::Error::new_spanned(
                 &field.target_type,
                 format!(
@@ -184,22 +174,16 @@ pub fn djanho_choice_derive(input: TokenStream) -> TokenStream {
     let variants = match &ast.data {
         Data::Enum(data) => &data.variants,
         _ => {
-            return syn::Error::new_spanned(
-                &ast,
-                "DjanhoChoice só pode ser usado em enums",
-            )
-            .to_compile_error()
-            .into();
+            return syn::Error::new_spanned(&ast, "DjanhoChoice só pode ser usado em enums")
+                .to_compile_error()
+                .into();
         }
     };
 
     if variants.is_empty() {
-        return syn::Error::new_spanned(
-            &ast,
-            "DjanhoChoice exige pelo menos uma variante",
-        )
-        .to_compile_error()
-        .into();
+        return syn::Error::new_spanned(&ast, "DjanhoChoice exige pelo menos uma variante")
+            .to_compile_error()
+            .into();
     }
 
     let mut variant_names = Vec::new();

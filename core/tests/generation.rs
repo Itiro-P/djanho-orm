@@ -1,5 +1,5 @@
 use djanho_core::choice_entry::ChoiceEntry;
-use djanho_core::generators::{generate_form, generate_schema};
+use djanho_core::generators::{ManyToManyRelation, generate_form, generate_schema};
 use djanho_core::model_entry::{FieldEntry, FieldKind, ModelEntry};
 
 static GENDER: ChoiceEntry = ChoiceEntry {
@@ -62,13 +62,19 @@ static BOOK_FIELDS: &[FieldEntry] = &[
     },
 ];
 
-static AUTHOR: ModelEntry = ModelEntry { name: "Author", fields: AUTHOR_FIELDS };
-static BOOK: ModelEntry = ModelEntry { name: "Book", fields: BOOK_FIELDS };
+static AUTHOR: ModelEntry = ModelEntry {
+    name: "Author",
+    fields: AUTHOR_FIELDS,
+};
+static BOOK: ModelEntry = ModelEntry {
+    name: "Book",
+    fields: BOOK_FIELDS,
+};
 
 #[test]
 fn foreign_key_becomes_references() {
     // Book vem primeiro de propósito: a ordenação deve inverter.
-    let sql = generate_schema(&[&BOOK, &AUTHOR], &[]).unwrap();
+    let sql = generate_schema(&[&BOOK, &AUTHOR], &[], &[]).unwrap();
 
     assert!(sql.contains("author_id INTEGER NOT NULL REFERENCES Author(id)"));
     assert!(sql.contains("id INTEGER PRIMARY KEY"));
@@ -80,7 +86,7 @@ fn foreign_key_becomes_references() {
 
 #[test]
 fn foreign_key_to_unknown_model_is_error() {
-    assert!(generate_schema(&[&BOOK], &[]).is_err());
+    assert!(generate_schema(&[&BOOK], &[], &[]).is_err());
 }
 
 static PERSON: ModelEntry = ModelEntry {
@@ -111,9 +117,30 @@ fn enum_becomes_html_select() {
 
 #[test]
 fn enum_becomes_sql_check() {
-    let sql = generate_schema(&[&PERSON], &[&GENDER]).unwrap();
+    let sql = generate_schema(&[&PERSON], &[&GENDER], &[]).unwrap();
 
     assert!(sql.contains("gender TEXT NOT NULL CHECK (gender IN ('Male', 'Female', 'Other'))"));
     assert!(sql.contains("cpf TEXT"));
     assert!(!sql.contains("cpf TEXT NOT NULL"));
+}
+
+#[test]
+fn many_to_many_generates_join_table() {
+    let relations = vec![ManyToManyRelation {
+        name: "Author_Book_Link".to_string(),
+        left_model: "Author".to_string(),
+        left_field: "author_id".to_string(),
+        right_model: "Book".to_string(),
+        right_field: "book_id".to_string(),
+    }];
+
+    let sql = generate_schema(&[&AUTHOR, &BOOK], &[], &relations).unwrap();
+
+    assert!(sql.contains("CREATE TABLE IF NOT EXISTS Author_Book_Link"));
+
+    assert!(sql.contains("author_id INTEGER NOT NULL REFERENCES Author(id)"));
+
+    assert!(sql.contains("book_id INTEGER NOT NULL REFERENCES Book(id)"));
+
+    assert!(sql.contains("PRIMARY KEY (author_id, book_id)"));
 }
