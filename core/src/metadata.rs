@@ -39,15 +39,6 @@ impl FieldMetadata {
     pub fn type_metadata(&self) -> Option<TypeMetadata> {
         analyze_type(&self.target_type)
     }
-
-    pub fn print(&self) {
-        let ty = &self.target_type;
-        println!(
-            "Name -> {}; Type -> {}.",
-            self.name,
-            quote::quote!(#ty)
-        );
-    }
 }
 
 /// Guarda as informações de uma estrutura durante a expansão do macro.
@@ -59,15 +50,6 @@ pub struct StructMetadata {
 impl StructMetadata {
     pub fn new(name: String, fields: Vec<FieldMetadata>) -> Self {
         Self { name, fields }
-    }
-
-    pub fn print(&self) {
-        println!("Struct: {}\nFields:", self.name);
-
-        for field in &self.fields {
-            print!(" - ");
-            field.print();
-        }
     }
 }
 
