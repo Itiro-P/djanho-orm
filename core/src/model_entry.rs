@@ -28,3 +28,16 @@ pub struct ModelEntry {
     pub name: &'static str,
     pub fields: &'static [FieldEntry],
 }
+
+/// Metadados de um relacionamento muitos-para-muitos entre dois models.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ManyToManyEntry {
+    /// Model que declara o relacionamento.
+    pub source_model: &'static str,
+
+    /// Nome do campo que representa o relacionamento.
+    pub field_name: &'static str,
+
+    /// Model relacionado.
+    pub target_model: &'static str,
+}

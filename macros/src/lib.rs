@@ -3,9 +3,10 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
-/// Lê `#[djanho(foreign_key = "Model")]` de um campo.
-fn parse_references(field: &syn::Field) -> syn::Result<Option<String>> {
+/// Lê os atributos de relacionamento de um campo.
+fn parse_relationships(field: &syn::Field) -> syn::Result<(Option<String>, Option<String>)> {
     let mut references = None;
+    let mut many_to_many = None;
 
     for attr in &field.attrs {
         if !attr.path().is_ident("djanho") {
@@ -14,16 +15,35 @@ fn parse_references(field: &syn::Field) -> syn::Result<Option<String>> {
 
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("foreign_key") {
+                if references.is_some() {
+                    return Err(meta.error("foreign_key foi declarado mais de uma vez"));
+                }
+
                 let value: syn::LitStr = meta.value()?.parse()?;
                 references = Some(value.value());
                 Ok(())
+            } else if meta.path.is_ident("many_to_many") {
+                if many_to_many.is_some() {
+                    return Err(meta.error("many_to_many foi declarado mais de uma vez"));
+                }
+
+                let value: syn::LitStr = meta.value()?.parse()?;
+                many_to_many = Some(value.value());
+                Ok(())
             } else {
-                Err(meta.error("atributo desconhecido; use #[djanho(foreign_key = \"Model\")]"))
+                Err(meta.error("atributo desconhecido; use foreign_key ou many_to_many"))
             }
         })?;
     }
 
-    Ok(references)
+    if references.is_some() && many_to_many.is_some() {
+        return Err(syn::Error::new_spanned(
+            field,
+            "um campo não pode ser foreign_key e many_to_many ao mesmo tempo",
+        ));
+    }
+
+    Ok((references, many_to_many))
 }
 
 /// Registra uma struct como model do Djanho.
@@ -52,31 +72,32 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
     };
 
     let mut fields = Vec::new();
+    let mut many_to_many_relations = Vec::new();
 
     for field in extracted_fields {
-        let Some(field_name) = field.ident.as_ref() else {
-            continue;
-        };
+        let field_name = field.ident.as_ref().unwrap().to_string();
 
         if field_name == "id" {
             return syn::Error::new_spanned(
-                field_name,
-                "o campo 'id' é reservado: o Djanho cria a chave primária automaticamente",
+                field,
+                "O campo 'id' é gerado automaticamente e não deve ser declarado",
             )
             .to_compile_error()
             .into();
         }
 
-        let references = match parse_references(field) {
-            Ok(references) => references,
+        let (references, many_to_many) = match parse_relationships(field) {
+            Ok(result) => result,
             Err(error) => return error.to_compile_error().into(),
         };
 
-        fields.push(FieldMetadata::new(
-            field_name.to_string(),
-            field.ty.clone(),
-            references,
-        ));
+        if let Some(target_model) = many_to_many {
+            many_to_many_relations.push((field_name, target_model));
+
+            continue;
+        }
+
+        fields.push(FieldMetadata::new(field_name, field.ty.clone(), references));
     }
 
     let struct_metadata = StructMetadata::new(struct_name.to_string(), fields);
@@ -151,6 +172,20 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
 
     let struct_name_str = struct_metadata.name.clone();
 
+    let generated_relations = many_to_many_relations
+        .iter()
+        .map(|(field_name, target_model)| {
+            quote! {
+                ::djanho_core::inventory::submit! {
+                    ::djanho_core::model_entry::ManyToManyEntry {
+                        source_model: #struct_name_str,
+                        field_name: #field_name,
+                        target_model: #target_model,
+                    }
+                }
+            }
+        });
+
     quote! {
         ::djanho_core::inventory::submit! {
             ::djanho_core::model_entry::ModelEntry {
@@ -158,6 +193,8 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
                 fields: &[#(#generated_fields),*],
             }
         }
+
+        #(#generated_relations)*
     }
     .into()
 }
