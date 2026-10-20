@@ -241,7 +241,10 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
             return syn::Error::new_spanned(
                 &field.target_type,
                 format!(
-                    "o campo '{}' é uma foreign_key e precisa ser um inteiro (i32, i64...)",
+                    "o campo '{}' é uma foreign_key e precisa ser um inteiro (i32)",
+                    // "Colunas do tipo INTEGER PRIMARY KEY devem conter um inteiro com sinal de 32 bits.
+                    // Qualquer tentativa de inserir dados que não sejam inteiros resultará em um erro."
+                    // https://www-sqlite-org.translate.goog/datatypes.html?_x_tr_sl=en&_x_tr_tl=pt&_x_tr_hl=pt&_x_tr_pto=tc
                     field.name
                 ),
             )

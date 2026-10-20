@@ -60,6 +60,7 @@ impl FieldMetadata {
         // mantendo uma única regra para interpretar tipos Rust.
         analyze_type(&self.target_type)
     }
+<<<<<<< HEAD
 
     /// Exibe o nome e o tipo do campo durante depuração manual.
     ///
@@ -69,6 +70,8 @@ impl FieldMetadata {
         let ty = &self.target_type;
         println!("Nome -> {}; Tipo -> {}.", self.name, quote::quote!(#ty));
     }
+=======
+>>>>>>> 5420dab (refact(qol): remove unecessary print functions, improve foreign_key error message)
 }
 
 /// Guarda as informações de uma estrutura durante a expansão do macro.
@@ -84,6 +87,7 @@ impl StructMetadata {
     pub fn new(name: String, fields: Vec<FieldMetadata>) -> Self {
         Self { name, fields }
     }
+<<<<<<< HEAD
 
     /// Exibe a struct e seus campos durante depuração manual.
     pub fn print(&self) {
@@ -94,6 +98,8 @@ impl StructMetadata {
             field.print();
         }
     }
+=======
+>>>>>>> 5420dab (refact(qol): remove unecessary print functions, improve foreign_key error message)
 }
 
 /// Analisa um tipo Rust.
