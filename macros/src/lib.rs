@@ -3,10 +3,72 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
+fn validate_many_to_many_type(ty: &syn::Type, expected: &str) -> syn::Result<()> {
+    let syn::Type::Path(collection) = ty else {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "many_to_many exige um campo do tipo Vec<Model>",
+        ));
+    };
+
+    let segment = collection.path.segments.last().ok_or_else(|| {
+        syn::Error::new_spanned(ty, "many_to_many exige um campo do tipo Vec<Model>")
+    })?;
+    if segment.ident != "Vec" {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "many_to_many exige um campo do tipo Vec<Model>",
+        ));
+    }
+
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "many_to_many exige um campo do tipo Vec<Model>",
+        ));
+    };
+    if arguments.args.len() != 1 {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "many_to_many exige um campo do tipo Vec<Model>",
+        ));
+    }
+
+    let Some(syn::GenericArgument::Type(syn::Type::Path(target))) = arguments.args.first() else {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "many_to_many exige um campo do tipo Vec<Model>",
+        ));
+    };
+    let target = target.path.segments.last().ok_or_else(|| {
+        syn::Error::new_spanned(ty, "many_to_many exige um campo do tipo Vec<Model>")
+    })?;
+    if !matches!(target.arguments, syn::PathArguments::None) {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "many_to_many exige um campo do tipo Vec<Model>",
+        ));
+    }
+    if target.ident != expected {
+        return Err(syn::Error::new_spanned(
+            ty,
+            format!(
+                "o tipo do campo referencia '{}', mas many_to_many declara '{}'",
+                target.ident, expected
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Lê os atributos de relacionamento de um campo.
-fn parse_relationships(field: &syn::Field) -> syn::Result<(Option<String>, Option<String>)> {
+fn parse_relationships(
+    field: &syn::Field,
+) -> syn::Result<(Option<String>, Option<String>, Option<String>)> {
     let mut references = None;
     let mut many_to_many = None;
+    let mut relation_name = None;
 
     for attr in &field.attrs {
         if !attr.path().is_ident("djanho") {
@@ -30,8 +92,16 @@ fn parse_relationships(field: &syn::Field) -> syn::Result<(Option<String>, Optio
                 let value: syn::LitStr = meta.value()?.parse()?;
                 many_to_many = Some(value.value());
                 Ok(())
+            } else if meta.path.is_ident("relation") {
+                if relation_name.is_some() {
+                    return Err(meta.error("relation foi declarado mais de uma vez"));
+                }
+
+                let value: syn::LitStr = meta.value()?.parse()?;
+                relation_name = Some(value.value());
+                Ok(())
             } else {
-                Err(meta.error("atributo desconhecido; use foreign_key ou many_to_many"))
+                Err(meta.error("atributo desconhecido; use foreign_key, many_to_many ou relation"))
             }
         })?;
     }
@@ -43,7 +113,14 @@ fn parse_relationships(field: &syn::Field) -> syn::Result<(Option<String>, Optio
         ));
     }
 
-    Ok((references, many_to_many))
+    if relation_name.is_some() && many_to_many.is_none() {
+        return Err(syn::Error::new_spanned(
+            field,
+            "relation só pode ser usado junto com many_to_many",
+        ));
+    }
+
+    Ok((references, many_to_many, relation_name))
 }
 
 /// Registra uma struct como model do Djanho.
@@ -86,13 +163,21 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
             .into();
         }
 
-        let (references, many_to_many) = match parse_relationships(field) {
+        let (references, many_to_many, relation_name) = match parse_relationships(field) {
             Ok(result) => result,
             Err(error) => return error.to_compile_error().into(),
         };
 
         if let Some(target_model) = many_to_many {
-            many_to_many_relations.push((field_name, target_model));
+            if let Err(error) = validate_many_to_many_type(&field.ty, &target_model) {
+                return error.to_compile_error().into();
+            }
+
+            many_to_many_relations.push((
+                field_name,
+                target_model,
+                relation_name.unwrap_or_default(),
+            ));
 
             continue;
         }
@@ -172,19 +257,21 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
 
     let struct_name_str = struct_metadata.name.clone();
 
-    let generated_relations = many_to_many_relations
-        .iter()
-        .map(|(field_name, target_model)| {
-            quote! {
-                ::djanho_core::inventory::submit! {
-                    ::djanho_core::model_entry::ManyToManyEntry {
-                        source_model: #struct_name_str,
-                        field_name: #field_name,
-                        target_model: #target_model,
+    let generated_relations =
+        many_to_many_relations
+            .iter()
+            .map(|(field_name, target_model, relation_name)| {
+                quote! {
+                    ::djanho_core::inventory::submit! {
+                        ::djanho_core::model_entry::ManyToManyEntry {
+                            source_model: #struct_name_str,
+                            field_name: #field_name,
+                            target_model: #target_model,
+                            relation_name: #relation_name,
+                        }
                     }
                 }
-            }
-        });
+            });
 
     quote! {
         ::djanho_core::inventory::submit! {
@@ -197,6 +284,33 @@ pub fn djanho_derive(input: TokenStream) -> TokenStream {
         #(#generated_relations)*
     }
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_many_to_many_type;
+    use syn::parse_quote;
+
+    #[test]
+    fn many_to_many_accepts_the_declared_vec_target() {
+        let field_type = parse_quote!(Vec<crate::Course>);
+
+        assert!(validate_many_to_many_type(&field_type, "Course").is_ok());
+    }
+
+    #[test]
+    fn many_to_many_rejects_non_vec_fields() {
+        let field_type = parse_quote!(Course);
+
+        assert!(validate_many_to_many_type(&field_type, "Course").is_err());
+    }
+
+    #[test]
+    fn many_to_many_rejects_mismatched_target_types() {
+        let field_type = parse_quote!(Vec<Course>);
+
+        assert!(validate_many_to_many_type(&field_type, "Student").is_err());
+    }
 }
 
 /// Registra um enum como conjunto de escolhas do Djanho.

@@ -40,4 +40,8 @@ pub struct ManyToManyEntry {
 
     /// Model relacionado.
     pub target_model: &'static str,
+
+    /// Identificador opcional para distinguir relações entre o mesmo par.
+    /// String vazia indica a relação padrão.
+    pub relation_name: &'static str,
 }

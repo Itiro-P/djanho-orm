@@ -1,5 +1,5 @@
 use crate::choice_entry::ChoiceEntry;
-use crate::model_entry::{FieldEntry, FieldKind, ModelEntry};
+use crate::model_entry::{FieldEntry, FieldKind, ManyToManyEntry, ModelEntry};
 
 /// Representa um relacionamento muitos-para-muitos (N:N).
 ///
@@ -20,18 +20,82 @@ pub struct ManyToManyRelation {
 
     /// Nome da coluna que referencia o segundo modelo.
     pub right_field: String,
+
+    /// Identificador que distingue relações entre o mesmo par de models.
+    pub relation_name: String,
+}
+
+/// Converte declarações N:N registradas nos models em tabelas intermediárias.
+///
+/// Uma relação declarada nos dois lados gera apenas uma tabela.
+pub fn resolve_many_to_many_relations(
+    entries: &[&ManyToManyEntry],
+) -> Result<Vec<ManyToManyRelation>, String> {
+    let mut relations = Vec::new();
+    let mut processed_relations = std::collections::BTreeSet::new();
+
+    for entry in entries {
+        let (left_model, right_model) = if entry.source_model <= entry.target_model {
+            (entry.source_model, entry.target_model)
+        } else {
+            (entry.target_model, entry.source_model)
+        };
+
+        if !processed_relations.insert((left_model, right_model, entry.relation_name)) {
+            continue;
+        }
+
+        let self_relation = left_model == right_model;
+        let relation_name = entry.relation_name;
+        let name = if relation_name.is_empty() {
+            format!("{left_model}_{right_model}_Link")
+        } else {
+            format!("{left_model}_{right_model}_{relation_name}_Link")
+        };
+
+        relations.push(ManyToManyRelation {
+            name,
+            left_model: left_model.to_string(),
+            left_field: if self_relation {
+                "source_id".to_string()
+            } else {
+                format!("{}_id", left_model.to_lowercase())
+            },
+            right_model: right_model.to_string(),
+            right_field: if self_relation {
+                "target_id".to_string()
+            } else {
+                format!("{}_id", right_model.to_lowercase())
+            },
+            relation_name: relation_name.to_string(),
+        });
+    }
+
+    Ok(relations)
 }
 
 /// Gera o HTML unificado para todos os modelos registrados.
 pub fn generate_form(entries: &[&ModelEntry], choices: &[&ChoiceEntry]) -> Result<String, String> {
+    generate_form_with_relations(entries, choices, &[])
+}
+
+/// Gera formulários com controles para foreign keys e relacionamentos N:N.
+pub fn generate_form_with_relations(
+    entries: &[&ModelEntry],
+    choices: &[&ChoiceEntry],
+    relations: &[ManyToManyRelation],
+) -> Result<String, String> {
     let mut forms = Vec::new();
 
     for entry in entries {
-        if entry.fields.is_empty() {
+        let has_many_to_many = relations.iter().any(|relation| {
+            relation.left_model == entry.name || relation.right_model == entry.name
+        });
+        if entry.fields.is_empty() && !has_many_to_many {
             continue;
         }
 
-        forms.push(generate_model_form(entry, choices)?);
+        forms.push(generate_model_form(entry, choices, relations)?);
     }
 
     forms.push(generate_css());
@@ -47,12 +111,16 @@ pub fn generate_schema(
     relations: &[ManyToManyRelation],
 ) -> Result<String, String> {
     validate_references(entries)?;
+    validate_many_to_many_relations(relations, entries)?;
 
     let mut schemas = Vec::new();
 
     // Gera primeiro as tabelas dos modelos.
     for entry in order_by_dependency(entries) {
-        if entry.fields.is_empty() {
+        let is_relationship_model = relations.iter().any(|relation| {
+            relation.left_model == entry.name || relation.right_model == entry.name
+        });
+        if entry.fields.is_empty() && !is_relationship_model {
             continue;
         }
 
@@ -67,6 +135,51 @@ pub fn generate_schema(
     Ok(schemas.join("\n\n"))
 }
 
+fn validate_many_to_many_relations(
+    relations: &[ManyToManyRelation],
+    entries: &[&ModelEntry],
+) -> Result<(), String> {
+    let mut table_names = std::collections::HashSet::new();
+
+    for relation in relations {
+        for (kind, identifier) in [
+            ("tabela", relation.name.as_str()),
+            ("model", relation.left_model.as_str()),
+            ("coluna", relation.left_field.as_str()),
+            ("model", relation.right_model.as_str()),
+            ("coluna", relation.right_field.as_str()),
+        ] {
+            if !is_sql_identifier(identifier) {
+                return Err(format!(
+                    "O nome da {kind} '{}' do relacionamento N:N é inválido",
+                    identifier
+                ));
+            }
+        }
+
+        if entries.iter().any(|entry| entry.name == relation.name) {
+            return Err(format!(
+                "A tabela intermediária '{}' conflita com o nome de um model",
+                relation.name
+            ));
+        }
+        if !table_names.insert(relation.name.as_str()) {
+            return Err(format!(
+                "Mais de um relacionamento N:N usa a tabela '{}'",
+                relation.name
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn is_sql_identifier(identifier: &str) -> bool {
+    let mut characters = identifier.chars();
+    matches!(characters.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
+        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
 /// Garante que toda foreign key aponta para um model registrado.
 fn validate_references(entries: &[&ModelEntry]) -> Result<(), String> {
     for entry in entries {
@@ -75,9 +188,7 @@ fn validate_references(entries: &[&ModelEntry]) -> Result<(), String> {
                 continue;
             };
 
-            let exists = entries
-                .iter()
-                .any(|other| other.name == target && !other.fields.is_empty());
+            let exists = entries.iter().any(|other| other.name == target);
 
             if !exists {
                 return Err(format!(
@@ -127,7 +238,11 @@ fn order_by_dependency<'a>(entries: &[&'a ModelEntry]) -> Vec<&'a ModelEntry> {
     ordered
 }
 
-fn generate_model_form(entry: &ModelEntry, choices: &[&ChoiceEntry]) -> Result<String, String> {
+fn generate_model_form(
+    entry: &ModelEntry,
+    choices: &[&ChoiceEntry],
+    relations: &[ManyToManyRelation],
+) -> Result<String, String> {
     let route = entry.name;
     let mut html = String::new();
 
@@ -150,6 +265,15 @@ fn generate_model_form(entry: &ModelEntry, choices: &[&ChoiceEntry]) -> Result<S
         }
     }
 
+    for relation in relations {
+        if relation.left_model == entry.name {
+            append_many_to_many_control(&mut html, relation, &relation.right_model);
+        }
+        if relation.right_model == entry.name && relation.left_model != entry.name {
+            append_many_to_many_control(&mut html, relation, &relation.left_model);
+        }
+    }
+
     html.push_str("    <button class=\"djanho-submit\" type=\"submit\">Cadastrar</button>\n");
     html.push_str("</form>");
 
@@ -163,6 +287,15 @@ fn generate_field_html(
 ) -> Result<String, String> {
     let id = format!("{}-{}", model_name.to_lowercase(), field.name);
     let required = if field.optional { "" } else { " required" };
+
+    if let Some(target) = field.references {
+        return Ok(generate_foreign_key_select(
+            &id,
+            field.name,
+            field.optional,
+            target,
+        ));
+    }
 
     let html = match field.kind {
         FieldKind::Text => format!(
@@ -233,6 +366,34 @@ fn generate_field_html(
     };
 
     Ok(html)
+}
+
+fn append_many_to_many_control(html: &mut String, relation: &ManyToManyRelation, target: &str) {
+    let id = format!("{}-{}", target.to_lowercase(), relation.name.to_lowercase());
+    html.push_str(&format!(
+        "    <label class=\"djanho-label\" for=\"{id}\">{target}</label>\n\
+         \x20   <select class=\"djanho-select\" id=\"{id}\" name=\"__relation__{}\" \
+         multiple data-djanho-target=\"{target}\">\n\
+         \x20   </select>\n",
+        relation.name
+    ));
+}
+
+fn generate_foreign_key_select(id: &str, name: &str, optional: bool, target: &str) -> String {
+    let required = if optional { "" } else { " required" };
+    let mut html = format!(
+        "<label class=\"djanho-label\" for=\"{id}\">{name}</label>\n\
+         <select class=\"djanho-select\" id=\"{id}\" name=\"{name}\"{required} \
+         data-djanho-target=\"{target}\">\n"
+    );
+
+    if optional {
+        html.push_str("    <option value=\"\">Nenhum</option>\n");
+    } else {
+        html.push_str("    <option value=\"\" disabled selected>Selecione...</option>\n");
+    }
+    html.push_str("</select>");
+    html
 }
 
 /// Gera o controle de um `bool` obrigatório.
@@ -475,11 +636,11 @@ fn generate_many_to_many_schema(
 ) -> Result<String, String> {
     let left_exists = entries
         .iter()
-        .any(|entry| entry.name == relation.left_model && !entry.fields.is_empty());
+        .any(|entry| entry.name == relation.left_model);
 
     let right_exists = entries
         .iter()
-        .any(|entry| entry.name == relation.right_model && !entry.fields.is_empty());
+        .any(|entry| entry.name == relation.right_model);
 
     if !left_exists {
         return Err(format!(
@@ -495,13 +656,6 @@ fn generate_many_to_many_schema(
         ));
     }
 
-    if relation.left_model == relation.right_model {
-        return Err(format!(
-            "O relacionamento '{}' aponta para o mesmo modelo nos dois lados",
-            relation.name
-        ));
-    }
-
     if relation.left_field == relation.right_field {
         return Err(format!(
             "O relacionamento '{}' usa o mesmo nome de coluna nos dois lados",
@@ -509,12 +663,21 @@ fn generate_many_to_many_schema(
         ));
     }
 
+    let self_relation_check = if relation.left_model == relation.right_model {
+        format!(
+            ",\n    CHECK ({} < {})",
+            relation.left_field, relation.right_field
+        )
+    } else {
+        String::new()
+    };
+
     Ok(format!(
         "-- Relacionamento N:N: {} <-> {}\n\
          CREATE TABLE IF NOT EXISTS {} (\n\
              {} INTEGER NOT NULL REFERENCES {}(id),\n\
              {} INTEGER NOT NULL REFERENCES {}(id),\n\
-             PRIMARY KEY ({}, {})\n\
+             PRIMARY KEY ({}, {}){}\n\
          );",
         relation.left_model,
         relation.right_model,
@@ -524,6 +687,7 @@ fn generate_many_to_many_schema(
         relation.right_field,
         relation.right_model,
         relation.left_field,
-        relation.right_field
+        relation.right_field,
+        self_relation_check
     ))
 }

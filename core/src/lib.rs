@@ -27,20 +27,6 @@ pub fn generate() -> io::Result<()> {
     entries.sort_by_key(|entry| entry.name);
     choices.sort_by_key(|choice| choice.name);
 
-    // // Relacionamentos N:N configurados manualmente.
-    // // Adicione relações aqui quando os dois modelos existirem.
-    // let relations: Vec<generators::ManyToManyRelation> = vec![
-    //     // Exemplo para habilitar quando os modelos estiverem registrados:
-    //     //
-    //     // generators::ManyToManyRelation {
-    //     //     name: "Aluno_Disciplina".to_string(),
-    //     //     left_model: "Aluno".to_string(),
-    //     //     left_field: "aluno_id".to_string(),
-    //     //     right_model: "Disciplina".to_string(),
-    //     //     right_field: "disciplina_id".to_string(),
-    //     // },
-    // ];
-
     let mut registered_relations: Vec<&model_entry::ManyToManyEntry> =
         inventory::iter::<model_entry::ManyToManyEntry>
             .into_iter()
@@ -54,42 +40,10 @@ pub fn generate() -> io::Result<()> {
         )
     });
 
-    let mut relations: Vec<generators::ManyToManyRelation> = Vec::new();
-    let mut processed_pairs = std::collections::BTreeSet::new();
+    let relations = generators::resolve_many_to_many_relations(&registered_relations)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
 
-    for relation in registered_relations {
-        // Ordenar os modelos evita gerar duas tabelas quando a relação
-        // também estiver declarada no modelo inverso.
-        let (left_model, right_model) = if relation.source_model <= relation.target_model {
-            (relation.source_model, relation.target_model)
-        } else {
-            (relation.target_model, relation.source_model)
-        };
-
-        if left_model == right_model {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Relacionamento N:N inválido: '{}' aponta para si mesmo",
-                    left_model
-                ),
-            ));
-        }
-
-        if !processed_pairs.insert((left_model, right_model)) {
-            continue;
-        }
-
-        relations.push(generators::ManyToManyRelation {
-            name: format!("{left_model}_{right_model}_Link"),
-            left_model: left_model.to_string(),
-            left_field: format!("{}_id", left_model.to_lowercase()),
-            right_model: right_model.to_string(),
-            right_field: format!("{}_id", right_model.to_lowercase()),
-        });
-    }
-
-    let html_content = generators::generate_form(&entries, &choices)
+    let html_content = generators::generate_form_with_relations(&entries, &choices, &relations)
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
 
     let sql_content = generators::generate_schema(&entries, &choices, &relations)
