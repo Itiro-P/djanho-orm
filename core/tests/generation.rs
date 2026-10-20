@@ -1,3 +1,8 @@
+//! Testes unitários dos textos SQL e HTML produzidos pelo gerador.
+//!
+//! Os valores `static` abaixo simulam os metadados que as macros registram
+//! durante a compilação.
+
 use djanho_core::choice_entry::ChoiceEntry;
 use djanho_core::generators::{
     ManyToManyRelation, generate_form, generate_form_with_relations, generate_schema,
@@ -178,6 +183,8 @@ fn many_to_many_generates_join_table() {
 
 #[test]
 fn many_to_many_relation_declared_on_both_models_creates_one_join_table() {
+    // Declarar a relação em ambos os modelos é comum; a geração deve remover
+    // a duplicata e criar uma única tabela intermediária.
     static AUTHOR_TO_BOOK: ManyToManyEntry = ManyToManyEntry {
         source_model: "Author",
         field_name: "books",
@@ -239,6 +246,7 @@ fn many_to_many_supports_self_relationships() {
 
 #[test]
 fn many_to_many_supports_multiple_named_relations_between_same_models() {
+    // Nomes diferentes representam relações diferentes entre o mesmo par.
     static AUTHOR_BOOKING: ManyToManyEntry = ManyToManyEntry {
         source_model: "Author",
         field_name: "books_written",
@@ -320,6 +328,8 @@ fn form_contains_foreign_key_and_many_to_many_controls() {
 
 #[test]
 fn relationship_only_models_receive_tables_and_forms() {
+    // Um model usado apenas em uma N:N ainda precisa existir para receber os
+    // vínculos na tabela intermediária.
     static LINK_ONLY_RELATION: ManyToManyEntry = ManyToManyEntry {
         source_model: "LinkOnlyModel",
         field_name: "books",

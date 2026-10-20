@@ -1,3 +1,9 @@
+"""Servidor HTTP simples que grava os formulários gerados em um banco SQLite.
+
+As rotas de models são criadas a partir das tabelas do schema. O servidor
+também carrega as opções dos campos relacionais e salva os vínculos N:N.
+"""
+
 import html
 import json
 import re
@@ -11,6 +17,7 @@ DB = "/data/db.sqlite"
 
 
 def check_table_exists(table: str) -> bool:
+    """Confere no catálogo do SQLite se uma tabela existe."""
     with closing(sqlite3.connect(DB)) as con:
         row = con.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? COLLATE NOCASE",
@@ -20,10 +27,12 @@ def check_table_exists(table: str) -> bool:
 
 
 def quote_identifier(identifier: str) -> str:
+    """Protege um nome de tabela ou coluna usado dentro de SQL."""
     return '"' + identifier.replace('"', '""') + '"'
 
 
 def get_columns(table: str, connection: sqlite3.Connection) -> list[tuple]:
+    """Lê os nomes e tipos das colunas sem abrir outra conexão."""
     return connection.execute(
         f"PRAGMA table_info({quote_identifier(table)})"
     ).fetchall()
@@ -34,7 +43,11 @@ def build_query(
     data: Mapping[str, list[str]],
     connection: sqlite3.Connection | None = None,
 ) -> tuple[str, list]:
-    # 'table' já foi validada contra sqlite_master, então é seguro interpolar.
+    """Monta um INSERT e seus valores usando parâmetros SQL.
+
+    Valores do formulário nunca são concatenados ao SQL. Os nomes das colunas
+    vêm do schema e são delimitados como identificadores do SQLite.
+    """
     if connection is None:
         with closing(sqlite3.connect(DB)) as con:
             cols = get_columns(table, con)
@@ -44,12 +57,15 @@ def build_query(
     names: list[str] = []
     values: list = []
     for _, name, ctype, notnull, _, pk in cols:
+        # O banco preenche a chave primária; só inserimos as outras colunas.
         if pk:  # id autoincrementado fica de fora
             continue
         ctype = ctype.upper()
         raw = data.get(name)  # list[str] | None
 
         if "BOOL" in ctype:
+            # Checkbox desmarcado não é enviado. Em campo obrigatório isso
+            # significa falso; em Option<bool>, campo vazio significa None.
             if raw is None or raw[-1] == "":
                 value = 0 if notnull else None
             elif raw[-1] in ("1", "true", "True"):
@@ -86,6 +102,7 @@ def build_query(
 def get_link_foreign_keys(
     table: str, connection: sqlite3.Connection
 ) -> list[tuple[str, str]]:
+    """Confirma que a tabela é uma associação N:N e retorna suas duas FKs."""
     columns = get_columns(table, connection)
     primary_key_columns = [row[1] for row in columns if row[5]]
     foreign_keys = connection.execute(
@@ -103,13 +120,16 @@ def get_link_foreign_keys(
 def insert_record(
     table: str, data: Mapping[str, list[str]]
 ) -> int:
+    """Insere um registro e, na mesma transação, os vínculos N:N selecionados."""
     with closing(sqlite3.connect(DB)) as connection:
+        # SQLite mantém FKs desligadas por padrão; ativamos em cada conexão.
         connection.execute("PRAGMA foreign_keys = ON")
         query, values = build_query(table, data, connection)
         cursor = connection.execute(query, values)
         record_id = cursor.lastrowid
 
         for key, related_ids in data.items():
+            # Os campos especiais são adicionados pelos controles N:N gerados.
             if not key.startswith("__relation__"):
                 continue
             relation_table = key.removeprefix("__relation__")
@@ -123,6 +143,7 @@ def insert_record(
                 )
 
             if len(source_columns) == 2:
+                # Em autorrelações, as duas FKs apontam para a mesma tabela.
                 source_column = "source_id" if "source_id" in source_columns else source_columns[0]
                 target_column = next(
                     column for column in source_columns if column != source_column
@@ -162,7 +183,7 @@ def insert_record(
 
 
 def fetch_rows(table: str) -> list[dict]:
-    # 'table' já foi validada contra sqlite_master, então é seguro interpolar.
+    """Retorna todas as linhas de uma tabela como uma lista de dicionários."""
     with closing(sqlite3.connect(DB)) as con:
         cur = con.execute(f"SELECT * FROM {quote_identifier(table)}")
         names = [d[0] for d in cur.description]
@@ -170,6 +191,7 @@ def fetch_rows(table: str) -> list[dict]:
 
 
 def populate_form_options(form: str) -> str:
+    """Preenche os selects relacionais no HTML antes de enviar ao navegador."""
     pattern = re.compile(
         r'(<select\b(?=[^>]*\bdata-djanho-target="([^"]+)")[^>]*>)'
         r"(.*?)</select>",
@@ -177,6 +199,7 @@ def populate_form_options(form: str) -> str:
     )
 
     def populate(match: re.Match) -> str:
+        # O atributo data-djanho-target identifica a tabela de onde vêm opções.
         target = match.group(2)
         if not check_table_exists(target):
             raise ValueError(f"model relacionado '{target}' não existe no schema")
@@ -207,6 +230,7 @@ def populate_form_options(form: str) -> str:
 
 
 def fetch_related(table: str, record_id: int, relation_table: str) -> list[dict]:
+    """Busca os modelos associados a um registro por uma tabela N:N."""
     with closing(sqlite3.connect(DB)) as connection:
         references = get_link_foreign_keys(relation_table, connection)
         source_columns = [
@@ -216,6 +240,8 @@ def fetch_related(table: str, record_id: int, relation_table: str) -> list[dict]
             raise ValueError(f"'{relation_table}' não relaciona o model '{table}'")
 
         if len(source_columns) == 2:
+            # Se os dois lados apontam para o mesmo model, procura o id nas
+            # duas colunas para tratar a associação de forma simétrica.
             first, second = source_columns
             query = (
                 f"SELECT target.* FROM {quote_identifier(table)} AS target "
@@ -252,6 +278,7 @@ def fetch_related(table: str, record_id: int, relation_table: str) -> list[dict]
 def fetch_children(
     parent_table: str, parent_id: int, child_table: str, foreign_key: str
 ) -> list[dict]:
+    """Busca os registros do lado "muitos" de uma relação 1:N."""
     with closing(sqlite3.connect(DB)) as connection:
         columns = get_columns(child_table, connection)
         matching = [
@@ -275,17 +302,20 @@ def fetch_children(
 
 
 def init_db():
+    """Cria ou atualiza as tabelas executando o schema gerado pelo Rust."""
     with closing(sqlite3.connect(DB)) as con:
         con.executescript(open("schema.sql").read())
 
 
 class Handler(BaseHTTPRequestHandler):
     def _status(self, code: int):
+        """Envia uma resposta sem conteúdo, usada para erros e rotas inválidas."""
         self.send_response(code)
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def _send(self, code: int, content_type: str, body: bytes):
+        """Envia uma resposta com tipo de conteúdo e corpo explícitos."""
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -293,6 +323,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        """Atende o formulário, consultas de tabelas e rotas de relações."""
         path = unquote(urlsplit(self.path).path)
         if path == "/form":
             with open("form.html", encoding="utf-8") as form_file:
@@ -338,6 +369,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, "application/json; charset=utf-8", body)
 
     def do_POST(self):
+        """Lê um formulário, salva o registro e responde com redirecionamento."""
         size = int(self.headers.get("Content-Length", 0))
         data = parse_qs(self.rfile.read(size).decode())
         parts = [part for part in unquote(urlsplit(self.path).path).split("/") if part]

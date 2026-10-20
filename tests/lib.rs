@@ -1,5 +1,10 @@
+//! Testes de integração para confirmar que os derives registram metadados
+//! que podem ser encontrados pelo restante da aplicação.
+
 use djanho_orm::Djanho;
 
+// Os campos N:N precisam ser Vec de outro model e aparecem no registro próprio
+// de relações, em vez de virar colunas dentro da tabela.
 #[derive(Djanho)]
 struct RelationshipStudent {
     #[djanho(many_to_many = "RelationshipCourse")]
@@ -51,6 +56,7 @@ struct RelationshipClass {
 
 #[test]
 fn derive_registers_many_to_many_metadata_in_both_directions() {
+    // inventory agrega declarações feitas em diferentes structs e módulos.
     let relations: Vec<_> =
         djanho_core::inventory::iter::<djanho_core::model_entry::ManyToManyEntry>
             .into_iter()

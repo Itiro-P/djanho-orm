@@ -1,3 +1,8 @@
+//! Geração do SQL e dos formulários HTML a partir dos metadados dos models.
+//!
+//! Esta parte não acessa o banco diretamente: ela transforma as informações
+//! coletadas pelas macros em textos que serão usados pelo backend.
+
 use crate::choice_entry::ChoiceEntry;
 use crate::model_entry::{FieldEntry, FieldKind, ManyToManyEntry, ModelEntry};
 
@@ -35,6 +40,8 @@ pub fn resolve_many_to_many_relations(
     let mut processed_relations = std::collections::BTreeSet::new();
 
     for entry in entries {
+        // A ordenação dá uma orientação única ao par. Assim, Author->Book e
+        // Book->Author são reconhecidos como a mesma associação.
         let (left_model, right_model) = if entry.source_model <= entry.target_model {
             (entry.source_model, entry.target_model)
         } else {
@@ -45,6 +52,8 @@ pub fn resolve_many_to_many_relations(
             continue;
         }
 
+        // Em relações de um model consigo mesmo, nomes como author_id seriam
+        // ambíguos. source_id e target_id deixam os dois lados distintos.
         let self_relation = left_model == right_model;
         let relation_name = entry.relation_name;
         let name = if relation_name.is_empty() {
@@ -75,6 +84,10 @@ pub fn resolve_many_to_many_relations(
 }
 
 /// Gera o HTML unificado para todos os modelos registrados.
+///
+/// Esta versão simples não recebe informações das relações N:N. Use
+/// `generate_form_with_relations` quando essas relações precisarem aparecer
+/// nos formulários.
 pub fn generate_form(entries: &[&ModelEntry], choices: &[&ChoiceEntry]) -> Result<String, String> {
     generate_form_with_relations(entries, choices, &[])
 }
@@ -88,6 +101,8 @@ pub fn generate_form_with_relations(
     let mut forms = Vec::new();
 
     for entry in entries {
+        // Um model sem campos comuns ainda precisa de formulário se participa
+        // de uma relação N:N, pois o utilizador pode criar seus vínculos.
         let has_many_to_many = relations.iter().any(|relation| {
             relation.left_model == entry.name || relation.right_model == entry.name
         });
@@ -98,6 +113,7 @@ pub fn generate_form_with_relations(
         forms.push(generate_model_form(entry, choices, relations)?);
     }
 
+    // O CSS é incluído uma vez ao final, compartilhado por todos os formulários.
     forms.push(generate_css());
 
     Ok(forms.join("\n\n"))
@@ -110,6 +126,8 @@ pub fn generate_schema(
     choices: &[&ChoiceEntry],
     relations: &[ManyToManyRelation],
 ) -> Result<String, String> {
+    // Validar antes de gerar evita produzir um arquivo SQL incompleto ou
+    // contendo referências a models que não existem.
     validate_references(entries)?;
     validate_many_to_many_relations(relations, entries)?;
 
@@ -135,6 +153,7 @@ pub fn generate_schema(
     Ok(schemas.join("\n\n"))
 }
 
+/// Valida nomes e conflitos das tabelas intermediárias antes de gerar SQL.
 fn validate_many_to_many_relations(
     relations: &[ManyToManyRelation],
     entries: &[&ModelEntry],
@@ -142,6 +161,8 @@ fn validate_many_to_many_relations(
     let mut table_names = std::collections::HashSet::new();
 
     for relation in relations {
+        // Identificadores SQL são interpolados no texto gerado, portanto
+        // aceitamos apenas letras, números e sublinhados.
         for (kind, identifier) in [
             ("tabela", relation.name.as_str()),
             ("model", relation.left_model.as_str()),
@@ -174,6 +195,7 @@ fn validate_many_to_many_relations(
     Ok(())
 }
 
+/// Impede que texto que não seja um identificador válido entre no SQL gerado.
 fn is_sql_identifier(identifier: &str) -> bool {
     let mut characters = identifier.chars();
     matches!(characters.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
@@ -213,6 +235,8 @@ fn order_by_dependency<'a>(entries: &[&'a ModelEntry]) -> Vec<&'a ModelEntry> {
         let mut still_pending = Vec::new();
 
         for entry in pending {
+            // Uma tabela pode ser criada quando todas as tabelas referenciadas
+            // já foram criadas. Uma FK para a própria tabela não impede isso.
             let ready = entry.fields.iter().all(|field| match field.references {
                 None => true,
                 Some(target) => {
@@ -230,6 +254,8 @@ fn order_by_dependency<'a>(entries: &[&'a ModelEntry]) -> Vec<&'a ModelEntry> {
         pending = still_pending;
 
         if pending.len() == before {
+            // Se nenhuma tabela ficou pronta, há um ciclo de dependências.
+            // Mantemos a ordem restante em vez de entrar em um loop infinito.
             ordered.extend(pending);
             break;
         }
@@ -238,6 +264,7 @@ fn order_by_dependency<'a>(entries: &[&'a ModelEntry]) -> Vec<&'a ModelEntry> {
     ordered
 }
 
+/// Gera um formulário completo para um model, incluindo campos e relações.
 fn generate_model_form(
     entry: &ModelEntry,
     choices: &[&ChoiceEntry],
@@ -256,6 +283,7 @@ fn generate_model_form(
     ));
 
     for field in entry.fields {
+        // Cada tipo de campo possui um controle HTML correspondente.
         let field_html = generate_field_html(entry.name, field, choices)?;
 
         for line in field_html.lines() {
@@ -266,6 +294,8 @@ fn generate_model_form(
     }
 
     for relation in relations {
+        // O formulário apresenta o outro lado da relação para permitir
+        // selecionar os registros que serão associados ao novo registro.
         if relation.left_model == entry.name {
             append_many_to_many_control(&mut html, relation, &relation.right_model);
         }
@@ -280,6 +310,7 @@ fn generate_model_form(
     Ok(html)
 }
 
+/// Escolhe e gera o controle HTML adequado ao tipo de um campo.
 fn generate_field_html(
     model_name: &str,
     field: &FieldEntry,
@@ -288,6 +319,8 @@ fn generate_field_html(
     let id = format!("{}-{}", model_name.to_lowercase(), field.name);
     let required = if field.optional { "" } else { " required" };
 
+    // Uma chave estrangeira é escolhida entre registros reais, não digitada
+    // como número. O backend preencherá as opções ao servir o formulário.
     if let Some(target) = field.references {
         return Ok(generate_foreign_key_select(
             &id,
@@ -368,6 +401,7 @@ fn generate_field_html(
     Ok(html)
 }
 
+/// Adiciona um seletor múltiplo para escolher registros de uma relação N:N.
 fn append_many_to_many_control(html: &mut String, relation: &ManyToManyRelation, target: &str) {
     let id = format!("{}-{}", target.to_lowercase(), relation.name.to_lowercase());
     html.push_str(&format!(
@@ -379,6 +413,7 @@ fn append_many_to_many_control(html: &mut String, relation: &ManyToManyRelation,
     ));
 }
 
+/// Cria um `<select>` cujas opções serão preenchidas pelo servidor Python.
 fn generate_foreign_key_select(id: &str, name: &str, optional: bool, target: &str) -> String {
     let required = if optional { "" } else { " required" };
     let mut html = format!(
@@ -396,12 +431,12 @@ fn generate_foreign_key_select(id: &str, name: &str, optional: bool, target: &st
     html
 }
 
-/// Gera o controle de um `bool` obrigatório.
+/// Gera o controle HTML de um `bool` obrigatório.
 ///
-/// Importante: `required` não deve ser usado em checkbox booleano, pois
-/// significaria que o formulário só é válido quando o checkbox estiver
-/// marcado. Para o Djanho, desmarcado representa `false` e marcado representa
-/// `true`.
+/// Um checkbox desmarcado não é enviado pelo navegador. Isso é adequado para
+/// um `bool`: o backend interpreta ausência como `false` e o valor `"1"` como
+/// `true`. Não usamos o atributo HTML `required`, pois ele impediria o usuário
+/// de salvar o valor `false`.
 fn generate_boolean_checkbox(id: &str, name: &str) -> String {
     format!(
         "<label class=\"djanho-checkbox-label\" for=\"{id}\">\n\
@@ -411,9 +446,10 @@ fn generate_boolean_checkbox(id: &str, name: &str) -> String {
     )
 }
 
-/// Gera o controle de `Option<bool>`.
+/// Gera o controle HTML de um `Option<bool>`.
 ///
-/// Os valores enviados pelo formulário são:
+/// Checkbox só representa dois estados, mas `Option<bool>` tem três. Por isso,
+/// usamos um seletor cujos valores enviados ao backend são:
 /// - `""`  -> `None`
 /// - `"1"` -> `Some(true)`
 /// - `"0"` -> `Some(false)`
@@ -427,6 +463,7 @@ fn generate_optional_boolean_select(id: &str, name: &str) -> String {
     )
 }
 
+/// Monta um `<select>` genérico para enums e valores booleanos opcionais.
 fn generate_select(
     id: &str,
     name: &str,
@@ -445,8 +482,10 @@ fn generate_select(
     ));
 
     if optional {
+        // O valor vazio representa ausência de valor para um campo opcional.
         html.push_str(&format!("    <option value=\"\">{empty_label}</option>\n"));
     } else {
+        // Um campo obrigatório começa sem seleção, forçando a escolha de uma opção.
         html.push_str(&format!(
             "    <option value=\"\" disabled selected>{empty_label}</option>\n"
         ));
@@ -460,7 +499,13 @@ fn generate_select(
     html
 }
 
+/// Retorna o CSS embutido que dá aparência consistente aos formulários.
+///
+/// Mantemos esse estilo em um único bloco, mesmo quando vários models geram
+/// formulários, para não repetir as mesmas regras para cada formulário.
 fn generate_css() -> String {
+    // O estilo é mantido junto do HTML para que o formulário gerado possa ser
+    // servido diretamente, sem depender de outro arquivo estático.
     r#"<style>
 .djanho-title {
     color: #1f2937;
@@ -545,10 +590,14 @@ fn generate_css() -> String {
         .to_string()
 }
 
+/// Constrói o `CREATE TABLE` de um model e de todas as suas colunas.
 fn generate_model_schema(entry: &ModelEntry, choices: &[&ChoiceEntry]) -> Result<String, String> {
+    // O banco cria o id automaticamente; os outros campos vêm dos metadados.
     let mut columns = vec!["    id INTEGER PRIMARY KEY".to_string()];
 
     for field in entry.fields {
+        // O conversor pode retornar erro quando, por exemplo, um enum não foi
+        // registrado com DjanhoChoice; nesse caso não criamos SQL parcial.
         columns.push(generate_sql_column(entry.name, field, choices)?);
     }
 
@@ -562,6 +611,8 @@ fn generate_model_schema(entry: &ModelEntry, choices: &[&ChoiceEntry]) -> Result
     Ok(sql)
 }
 
+/// Converte um campo em uma definição de coluna SQL, incluindo nulabilidade,
+/// validações e chave estrangeira, quando aplicável.
 fn generate_sql_column(
     model_name: &str,
     field: &FieldEntry,
@@ -569,6 +620,7 @@ fn generate_sql_column(
 ) -> Result<String, String> {
     let not_null = if field.optional { "" } else { " NOT NULL" };
 
+    // Converte cada tipo reconhecido em um tipo SQLite e aplica suas regras.
     let mut column = match field.kind {
         FieldKind::Text => {
             format!("    {} TEXT{}", field.name, not_null)
@@ -619,17 +671,23 @@ fn generate_sql_column(
     };
 
     if let Some(target) = field.references {
+        // A coluna continua sendo numérica, mas o banco também verifica que
+        // o id informado existe na tabela apontada.
         column.push_str(&format!(" REFERENCES {}(id)", target));
     }
 
     Ok(column)
 }
 
+/// Procura um enum registrado pelo nome usado no tipo do campo.
 fn find_choice<'a>(choices: &'a [&ChoiceEntry], name: &str) -> Option<&'a ChoiceEntry> {
     choices.iter().copied().find(|choice| choice.name == name)
 }
 
 /// Gera a tabela intermediária de um relacionamento N:N.
+///
+/// Cada linha desta tabela representa um par de registros relacionados.
+/// A chave primária composta impede que o mesmo par seja inserido duas vezes.
 fn generate_many_to_many_schema(
     relation: &ManyToManyRelation,
     entries: &[&ModelEntry],
@@ -664,6 +722,8 @@ fn generate_many_to_many_schema(
     }
 
     let self_relation_check = if relation.left_model == relation.right_model {
+        // Ordenar os ids de uma autorrelação evita guardar o mesmo par duas
+        // vezes em direções opostas e impede que um registro se associe a si.
         format!(
             ",\n    CHECK ({} < {})",
             relation.left_field, relation.right_field

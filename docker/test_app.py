@@ -1,3 +1,5 @@
+"""Testes do backend HTTP e SQLite usando bancos temporários."""
+
 import json
 import os
 import sqlite3
@@ -13,7 +15,10 @@ import app
 
 
 class RelationshipBackendTests(unittest.TestCase):
+    """Cada teste começa com um schema isolado para não compartilhar dados."""
+
     def setUp(self):
+        """Cria tabelas de exemplo e aponta o servidor para um arquivo temporário."""
         handle, self.database = tempfile.mkstemp(suffix=".sqlite")
         os.close(handle)
         app.DB = self.database
@@ -58,9 +63,11 @@ class RelationshipBackendTests(unittest.TestCase):
             connection.commit()
 
     def tearDown(self):
+        """Apaga o banco temporário ao terminar o teste."""
         os.unlink(self.database)
 
     def test_create_parent_and_n_to_n_links(self):
+        """Confirma que o POST grava o registro e seu vínculo N:N."""
         with closing(sqlite3.connect(app.DB)) as connection:
             course_id = connection.execute(
                 "INSERT INTO Course (title) VALUES (?)", ("Rust",)
@@ -79,6 +86,7 @@ class RelationshipBackendTests(unittest.TestCase):
         self.assertEqual([row["title"] for row in related], ["Rust"])
 
     def test_relationship_only_model_uses_default_values_insert(self):
+        """Confirma que um model sem campos pode ser criado só para ter relações."""
         with closing(sqlite3.connect(app.DB)) as connection:
             course_id = connection.execute(
                 "INSERT INTO Course (title) VALUES (?)", ("Rust",)
@@ -97,6 +105,7 @@ class RelationshipBackendTests(unittest.TestCase):
         self.assertEqual(related[0]["title"], "Rust")
 
     def test_create_link_from_inverse_form_side(self):
+        """Confirma que o vínculo também funciona pelo outro lado da relação."""
         with closing(sqlite3.connect(app.DB)) as connection:
             student_id = connection.execute(
                 "INSERT INTO Student (name) VALUES (?)", ("Ana",)
@@ -115,6 +124,7 @@ class RelationshipBackendTests(unittest.TestCase):
         self.assertEqual([row["name"] for row in related], ["Ana"])
 
     def test_self_relation_is_symmetric_for_queries(self):
+        """Confirma que a consulta encontra uma autorrelação em qualquer direção."""
         with closing(sqlite3.connect(app.DB)) as connection:
             employee_ids = [
                 connection.execute(
@@ -146,7 +156,7 @@ class RelationshipBackendTests(unittest.TestCase):
             },
         )
 
-        # Also verify SQL endpoint semantics with a direct pair.
+        # Cria um par direto para verificar a consulta simétrica.
         with closing(sqlite3.connect(app.DB)) as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO Employee_Employee_Link VALUES (?, ?)",
@@ -159,10 +169,12 @@ class RelationshipBackendTests(unittest.TestCase):
         self.assertIn("Ana", [row["name"] for row in related])
 
     def test_nullable_one_to_many_foreign_key_accepts_empty_value(self):
+        """Um campo FK opcional vazio deve ser gravado como NULL."""
         app.insert_record("Class", {"teacher_id": [""]})
         self.assertEqual(app.fetch_rows("Class")[0]["teacher_id"], None)
 
     def test_boolean_form_values_distinguish_false_from_absent_optional(self):
+        """Distingue false de None para manter os três estados de Option<bool>."""
         app.insert_record("BooleanValues", {"optional": ["0"]})
         app.insert_record("BooleanValues", {"mandatory": ["1"]})
 
@@ -173,6 +185,7 @@ class RelationshipBackendTests(unittest.TestCase):
         self.assertIsNone(rows[1]["optional"])
 
     def test_form_options_are_loaded_and_html_escaped(self):
+        """As opções vêm do banco e textos são escapados para evitar HTML injetado."""
         with closing(sqlite3.connect(app.DB)) as connection:
             connection.execute("INSERT INTO Course (title) VALUES (?)", ("<Rust>",))
             connection.commit()
@@ -186,6 +199,7 @@ class RelationshipBackendTests(unittest.TestCase):
         self.assertIn('<option value="1">', rendered)
 
     def test_unrelated_table_cannot_be_used_as_join_table(self):
+        """Uma tabela sem duas FKs e chave composta não pode receber vínculos."""
         with self.assertRaises(ValueError):
             app.insert_record(
                 "Student",
@@ -196,6 +210,7 @@ class RelationshipBackendTests(unittest.TestCase):
             )
 
     def test_one_to_many_children_query_checks_foreign_key(self):
+        """A rota 1:N só aceita a FK que realmente aponta para o model pai."""
         with closing(sqlite3.connect(app.DB)) as connection:
             teacher_id = connection.execute(
                 "INSERT INTO Teacher (name) VALUES (?)", ("Marta",)
@@ -212,6 +227,7 @@ class RelationshipBackendTests(unittest.TestCase):
             app.fetch_children("Teacher", teacher_id, "Class", "id")
 
     def test_http_post_and_relationship_routes(self):
+        """Exercita POST e rotas de consulta pela interface HTTP real."""
         server = HTTPServer(("127.0.0.1", 0), app.Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
