@@ -1,59 +1,65 @@
 # djanho-orm
-The Djanho ORM, a (not) blazing fast Object Relational Mapper which outputs to SQL and HTML form.
+O Djanho ORM é um mapeador objeto-relacional que gera arquivos SQL e formulários HTML.
 
-## Relationships
+## Relacionamentos
 
-The schema generator supports one-to-many relationships through a foreign key
-on the model on the "many" side. Optional foreign keys are represented by
-`Option`:
+O gerador de esquema oferece suporte a relacionamentos um-para-muitos (1:N)
+por meio de uma chave estrangeira no modelo do lado "muitos". Chaves
+estrangeiras opcionais são representadas com `Option`:
 
 ```rust
 #[derive(Djanho)]
-struct Teacher {
+struct Professor {
     name: String,
 }
 
 #[derive(Djanho)]
-struct Class {
-    #[djanho(foreign_key = "Teacher")]
-    teacher_id: Option<i64>,
+struct Turma {
+    #[djanho(foreign_key = "Professor")]
+    professor_id: Option<i64>,
 }
 ```
 
-Many-to-many relationships use a `Vec<Model>` field annotated with
-`many_to_many`:
+Relacionamentos muitos-para-muitos (N:N) usam um campo `Vec<Modelo>` anotado
+com `many_to_many`:
 
 ```rust
 #[derive(Djanho)]
-struct Student {
-    #[djanho(many_to_many = "Course")]
-    courses: Vec<Course>,
+struct Aluno {
+    #[djanho(many_to_many = "Disciplina")]
+    disciplinas: Vec<Disciplina>,
 }
 ```
 
-The referenced type and attribute value must name the same model. The relation
-can be declared on one model or both; declaring both directions still
-generates one join table with foreign keys and a composite primary key. A
-relationship can be named to allow multiple associations between the same
-models; use the same `relation` value on inverse declarations:
+O tipo referenciado e o valor do atributo precisam indicar o mesmo modelo. A
+relação pode ser declarada em um ou nos dois modelos; declarar as duas
+direções ainda gera apenas uma tabela intermediária, com chaves estrangeiras
+e chave primária composta. Para criar várias associações entre o mesmo par de
+modelos, dê um nome a cada relação com `relation` e use o mesmo nome nas
+declarações inversas:
 
 ```rust
 #[derive(Djanho)]
-struct Article {
-    #[djanho(many_to_many = "Person", relation = "Authors")]
-    authors: Vec<Person>,
-    #[djanho(many_to_many = "Person", relation = "Editors")]
-    editors: Vec<Person>,
+struct Livro {
+    #[djanho(many_to_many = "Pessoa", relation = "Autores")]
+    autores: Vec<Pessoa>,
+    #[djanho(many_to_many = "Pessoa", relation = "Editores")]
+    editores: Vec<Pessoa>,
 }
 ```
 
-Self-referential N:N relationships are supported too, for example a
-`Vec<Employee>` annotated with `many_to_many = "Employee"`. Its generated
-association is symmetric when queried.
+Também há suporte a relações N:N autorreferentes. Por exemplo, um campo
+`Vec<Funcionario>` pode ser anotado com
+`many_to_many = "Funcionario"`. Ao consultar essa relação, a associação é
+considerada simétrica.
 
-Generated forms load options from the database for foreign keys and N:N
-relationships. Submitting a model form saves its record and selected links.
-The HTTP backend provides:
+Os formulários gerados carregam do banco as opções de chaves estrangeiras e
+relacionamentos N:N. Ao enviar um formulário, o backend salva o registro e
+os vínculos selecionados.
 
-- `GET /Parent/{id}/children/Child/foreign_key` to list 1:N children.
-- `GET /Model/{id}/related/AssociationTable` to list N:N related models.
+### Rotas HTTP
+
+- `GET /Modelo/{id}/children/ModeloFilho/chave_estrangeira`: lista os
+  registros filhos de uma relação 1:N.
+- `GET /Modelo/{id}/related/TabelaIntermediaria`: lista os registros
+  relacionados por uma associação N:N.
