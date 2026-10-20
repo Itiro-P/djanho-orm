@@ -1,8 +1,18 @@
-use djanho_orm::Djanho;
+use djanho_orm::{Djanho, DjanhoChoice};
+
+#[derive(DjanhoChoice)]
+enum Gender {
+    Male,
+    Female,
+    Crab
+}
 
 #[derive(Djanho)]
 struct Student {
     name: String,
+    gender: Gender,
+    is_veteran: bool,
+    age: u32,
     #[djanho(many_to_many = "Course")]
     courses: Vec<Course>,
 }
